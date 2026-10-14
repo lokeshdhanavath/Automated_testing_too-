@@ -1,0 +1,5 @@
+{
+  "tests/test_totals.py::test_weekly_total_equals_sum_of_days[chromium]": true,
+  "tests/test_navigation.py::test_next_week_is_blocked[chromium]": true,
+  "tests/test_week_limits.py::test_future_week_blocks_hour_entry[chromium]": true
+}

@@ -1,0 +1,16 @@
+# Virtual environment
+.venv/
+
+# Secrets and credentials
+.env
+auth/apex_state.json
+
+# Test artifacts
+screenshots/
+videos/
+reports/
+history/
+
+# Python
+__pycache__/
+*.pyc
