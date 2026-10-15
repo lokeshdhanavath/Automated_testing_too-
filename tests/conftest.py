@@ -13,6 +13,7 @@ Two ways to get a browser page:
 APEX binds its session to the ?session= URL parameter. We capture that token
 once after login and reuse it in every navigation.
 """
+import os 
 import time
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
@@ -26,7 +27,9 @@ from pages.login_page import LoginPage
 from pages.timesheet_page import TimesheetPage
 
 # ---------- One run ID for the whole session ----------
-RUN_ID = datetime.now().strftime("%Y%m%d_%H%M%S")
+RUN_ID = os.getenv("DASHBOARD_RUN_ID") or datetime.now().strftime(
+    "%Y%m%d_%H%M%S"
+)
 LOGGER, LOG_PATH = get_run_logger(RUN_ID)
 
 # ---------- Collected results across the session ----------

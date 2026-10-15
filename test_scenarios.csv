@@ -1,0 +1,4 @@
+TC_ID,Scenario,Preconditions,Steps,Expected_Result,Priority
+TC-001,Verify login page loads,Application is available,Open login page,Username and password fields are visible,High
+TC-002,Verify login with valid credentials,Test credentials are configured,Open login page; enter credentials; click Sign In,User is logged in successfully,High
+TC-003,Verify timesheet navigation,User is logged in,Open My Timesheet,Timesheet grid is visible,Medium

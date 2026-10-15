@@ -216,29 +216,39 @@ class TimesheetPage:
             return False
 
     def dialog_project_names(self) -> list:
-        """Return the list of project names shown in the open dialog."""
+        """
+        Return the list of project names shown in the open dialog.
+        Uses DOM inspection to find text nodes that look like project names
+        (skips icon glyphs like '▣' and hint text).
+        """
         names = []
         try:
             handles = self.page.evaluate(
                 """
                 () => {
                     const out = [];
-                    const walker = document.createTreeWalker(
-                        document.body, NodeFilter.SHOW_TEXT, null);
-                    while (walker.nextNode()) {
-                        const t = walker.currentNode.nodeValue || '';
+                    const dialog = document.querySelector(
+                        '.ui-dialog, .a-Dialog, [role="dialog"], .apex-page-modal'
+                    ) || document.body;
+
+                    const all = dialog.querySelectorAll('*');
+                    for (const el of all) {
+                        const t = (el.innerText || '').trim();
                         if (!t.includes('›')) continue;
-                        let el = walker.currentNode.parentElement;
-                        for (let i = 0; i < 6 && el; i++) {
-                            const txt = (el.innerText || '').trim();
-                            if (txt && txt.length < 120
-                                && txt.length > 2
-                                && !txt.includes('Choose a project')) {
-                                out.push(txt.split('\\n')[0].trim());
-                                break;
-                            }
-                            el = el.parentElement;
-                        }
+                        if (t.length > 200) continue;
+
+                        let cleaned = t.replace(/[▣◻▪■●○□]/g, '');
+                        cleaned = cleaned.replace('›', '');
+                        cleaned = cleaned.trim();
+
+                        const first = cleaned.split(/\\r?\\n/)[0].trim();
+
+                        if (!first) continue;
+                        if (first.includes('Choose a project')) continue;
+                        if (first.includes('Select Project')) continue;
+                        if (first.length > 80) continue;
+
+                        if (!out.includes(first)) out.push(first);
                     }
                     return out;
                 }
@@ -324,15 +334,21 @@ class TimesheetPage:
 
     def try_set_hours_first_input(self, value: str = "4") -> str:
         """
-        Attempt to type into the first hour input on the current page.
-        Returns the value read back from the field.
-        If no hour input exists, returns '<no-input>'.
+        Attempt to type into the first hour input.
+        If the field is missing OR disabled, returns '<no-input>' or '<disabled>'.
         Never clicks Save.
         """
         inputs = self.page.locator(self.HOURS_INPUT)
         if inputs.count() == 0:
             return "<no-input>"
+
         field = inputs.first
+        try:
+            if not field.is_enabled():
+                return "<disabled>"
+        except Exception:
+            return "<disabled>"
+
         field.click()
         field.fill("")
         field.type(value, delay=30)
@@ -344,10 +360,11 @@ class TimesheetPage:
         """Clear the first hour input (cleanup, no save)."""
         try:
             field = self.page.locator(self.HOURS_INPUT).first
-            field.click()
-            field.fill("")
-            field.press("Tab")
-            self.page.wait_for_timeout(400)
+            if field.is_enabled():
+                field.click()
+                field.fill("")
+                field.press("Tab")
+                self.page.wait_for_timeout(400)
         except Exception:
             pass
         return self
@@ -370,6 +387,36 @@ class TimesheetPage:
             except Exception:
                 pass
         return names
+
+    # =====================================================
+    # Persistence operations (these DO modify data — use carefully)
+    # =====================================================
+
+    def click_save(self):
+        """Click Save. PERSISTS changes. Use only in state_changing tests."""
+        self.page.locator(self.BTN_SAVE).click(no_wait_after=True)
+        self.page.wait_for_timeout(3000)
+        return self
+
+    def click_delete_row(self, row_index: int = 0):
+        """Click the Delete button for a specific row (0-based)."""
+        try:
+            buttons = self.page.locator(self.BTN_DELETE_PROJECT)
+            if buttons.count() == 0:
+                return self
+            buttons.nth(row_index).click(no_wait_after=True)
+            self.page.wait_for_timeout(2000)
+        except Exception:
+            pass
+        return self
+
+    def reload(self):
+        """Reload the page and re-select the current week."""
+        self.page.goto(self.page.url, wait_until="load", timeout=60000)
+        self.wait_until_loaded()
+        self.select_current_week()
+        self.page.wait_for_timeout(1500)
+        return self
 
     # =====================================================
     # Helpers
