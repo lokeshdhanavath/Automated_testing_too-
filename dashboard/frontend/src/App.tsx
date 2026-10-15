@@ -451,8 +451,8 @@ def test_new_feature(page):
             <FlaskConical size={23} />
           </div>
           <div>
-            <strong>TestPilot</strong>
-            <span>Automation Platform</span>
+            <strong>Veriqon</strong>
+            <span>Automation Intelligence</span>
           </div>
         </div>
 
