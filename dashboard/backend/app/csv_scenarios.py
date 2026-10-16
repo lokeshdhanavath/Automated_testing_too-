@@ -18,19 +18,19 @@ REQUIRED_COLUMNS = [
 ALLOWED_PRIORITIES = {"HIGH", "MEDIUM", "LOW"}
 MAX_FILE_SIZE = 2 * 1024 * 1024  # 2 MB
 
-
-# Explicit mappings to existing Playwright/pytest test IDs.
-# Add more mappings only after confirming the corresponding test exists.
+# Only map scenarios to existing, reviewed pytest tests.
 SCENARIO_TEST_MAP = {
     "TC-001": "tests/test_login.py::test_login_page_loads[chromium]",
     "TC-002": "tests/test_login.py::test_login_with_valid_credentials[chromium]",
     "TC-003": "tests/test_login.py::test_navigate_to_my_timesheet[chromium]",
+    "TC-007": "tests/test_projects.py::test_adding_one_project_adds_one_row[chromium]",
+    "TC-008": "tests/test_validation.py::test_over_max_hours_cleared[chromium]",
 }
 
 
 @router.post("/validate")
 async def validate_csv(file: UploadFile = File(...)):
-    """Validate a CSV scenario file without executing tests."""
+    """Validate CSV structure, rows, and approved test mappings."""
 
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(
@@ -72,8 +72,7 @@ async def validate_csv(file: UploadFile = File(...)):
             )
 
         missing = [
-            column
-            for column in REQUIRED_COLUMNS
+            column for column in REQUIRED_COLUMNS
             if column not in headers
         ]
 
@@ -87,9 +86,9 @@ async def validate_csv(file: UploadFile = File(...)):
                 },
             )
 
-        rows = []
-        seen_ids = set()
+        scenarios = []
         errors = []
+        seen_ids = set()
 
         for row_number, raw_row in enumerate(reader, start=2):
             if None in raw_row:
@@ -109,15 +108,15 @@ async def validate_csv(file: UploadFile = File(...)):
             if not any(row.values()):
                 continue
 
-            row_errors = []
             tc_id = row.get("TC_ID", "")
             priority = row.get("Priority", "").upper()
+            row_errors = []
 
             for column in REQUIRED_COLUMNS:
                 if not row.get(column):
                     row_errors.append(f"{column} is required")
 
-            if tc_id and tc_id in seen_ids:
+            if tc_id in seen_ids and tc_id:
                 row_errors.append(f"Duplicate TC_ID: {tc_id}")
 
             if tc_id:
@@ -135,32 +134,35 @@ async def validate_csv(file: UploadFile = File(...)):
                     "messages": row_errors,
                 })
 
-            rows.append(row)
+            mapped = tc_id in SCENARIO_TEST_MAP
+            row_valid = len(row_errors) == 0
 
-        invalid_row_count = sum(
-            1
-            for error in errors
-            if "tc_id" in error
-        )
-        extra_value_errors = sum(
-            1
-            for error in errors
-            if "message" in error
-        )
+            # Extra response fields help the UI distinguish
+            # CSV validity from whether a test can be executed.
+            row["valid"] = row_valid
+            row["validation_errors"] = row_errors
+            row["mapped"] = mapped
+            row["runnable"] = row_valid and mapped
 
-        valid_rows = max(
-            0,
-            len(rows) - invalid_row_count - extra_value_errors,
+            scenarios.append(row)
+
+        total_rows = len(scenarios)
+        valid_rows = sum(
+            1 for scenario in scenarios if scenario["valid"]
+        )
+        runnable_rows = sum(
+            1 for scenario in scenarios if scenario["runnable"]
         )
 
         return {
-            "valid": len(errors) == 0 and len(rows) > 0,
+            "valid": total_rows > 0 and len(errors) == 0,
             "filename": file.filename,
-            "total_rows": len(rows) + extra_value_errors,
+            "total_rows": total_rows,
             "valid_rows": valid_rows,
+            "runnable_rows": runnable_rows,
             "errors": errors,
             "columns": REQUIRED_COLUMNS,
-            "scenarios": rows,
+            "scenarios": scenarios,
         }
 
     except csv.Error as exc:
@@ -171,31 +173,23 @@ async def validate_csv(file: UploadFile = File(...)):
 
 
 @router.post("/execute")
-
-@router.post("/execute")
 async def execute_csv_scenarios(
     file: UploadFile = File(...),
     selected_tc_ids: list[str] = Form(...),
 ):
-    """Execute selected CSV scenarios mapped to approved pytest tests."""
+    """Run selected scenarios that have valid rows and approved mappings."""
 
-    # Validate the uploaded CSV first.
     validation = await validate_csv(file)
 
     if not validation["valid"]:
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "CSV validation failed.",
+                "message": "CSV validation failed. Fix the CSV errors first.",
                 "errors": validation["errors"],
             },
         )
 
-    # Normalize repeated values and comma-separated values.
-    # Examples:
-    # ["TC-001", "TC-003"]       -> ["TC-001", "TC-003"]
-    # ["TC-001,TC-003"]          -> ["TC-001", "TC-003"]
-    # ["TC-001, TC-003", "TC-002"] -> ["TC-001", "TC-003", "TC-002"]
     normalized_ids = [
         tc_id.strip()
         for value in selected_tc_ids
@@ -209,30 +203,49 @@ async def execute_csv_scenarios(
             detail="Select at least one test scenario.",
         )
 
-    # Reject duplicates after normalization.
     if len(normalized_ids) != len(set(normalized_ids)):
         raise HTTPException(
             status_code=400,
             detail="Duplicate scenario IDs were selected.",
         )
 
-    csv_ids = {
-        scenario["TC_ID"]
+    scenario_by_id = {
+        scenario["TC_ID"]: scenario
         for scenario in validation["scenarios"]
     }
 
-    missing_from_csv = set(normalized_ids) - csv_ids
+    missing_from_csv = [
+        tc_id for tc_id in normalized_ids
+        if tc_id not in scenario_by_id
+    ]
 
     if missing_from_csv:
         raise HTTPException(
             status_code=400,
             detail={
                 "message": "Selected scenario IDs are not present in the CSV.",
-                "ids": sorted(missing_from_csv),
+                "ids": missing_from_csv,
             },
         )
 
-    unmapped_ids = set(normalized_ids) - set(SCENARIO_TEST_MAP)
+    invalid_ids = [
+        tc_id for tc_id in normalized_ids
+        if not scenario_by_id[tc_id]["valid"]
+    ]
+
+    if invalid_ids:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Some selected CSV rows are invalid.",
+                "ids": invalid_ids,
+            },
+        )
+
+    unmapped_ids = [
+        tc_id for tc_id in normalized_ids
+        if not scenario_by_id[tc_id]["mapped"]
+    ]
 
     if unmapped_ids:
         raise HTTPException(
@@ -241,26 +254,23 @@ async def execute_csv_scenarios(
                 "message": (
                     "Some scenarios do not have approved test mappings yet."
                 ),
-                "ids": sorted(unmapped_ids),
+                "ids": unmapped_ids,
             },
         )
 
-    # Preserve the user's selection order.
+    # Keep the user's selected order.
     pytest_ids = [
         SCENARIO_TEST_MAP[tc_id]
         for tc_id in normalized_ids
     ]
 
-    # Reuse the existing run lifecycle.
+    # Reuse the existing dashboard test-run lifecycle.
     from app.main import RunRequest, start_run
 
-    result = start_run(
-        RunRequest(test_ids=pytest_ids)
-    )
+    result = start_run(RunRequest(test_ids=pytest_ids))
 
     return {
         **result,
         "selected_tc_ids": normalized_ids,
         "pytest_test_ids": pytest_ids,
     }
-

@@ -13,8 +13,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from app.scripts_api import router as scripts_router
 from app.csv_scenarios import router as csv_scenarios_router
+from app.projects_api import router as projects_router
 
 
 # ---------------------------------------------------------
@@ -22,6 +22,7 @@ from app.csv_scenarios import router as csv_scenarios_router
 # ---------------------------------------------------------
 
 ROOT = Path(__file__).resolve().parents[3]
+
 TESTS_DIR = ROOT / "tests"
 REPORT_DIR = ROOT / "reports" / "json"
 XML_DIR = ROOT / "reports" / "xml"
@@ -52,9 +53,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+<<<<<<< HEAD
 
 app.include_router(scripts_router)
+=======
+# Existing CSV functionality and new project configuration API.
+>>>>>>> 788987f (modified dashboard)
 app.include_router(csv_scenarios_router)
+app.include_router(projects_router)
 
 lock = Lock()
 runs = {}
@@ -178,7 +184,7 @@ def read_report(run_id):
 
 
 def get_json_report(run_id):
-    """Return a timestamp-based project JSON report if available."""
+    """Return a JSON report for this dashboard run if available."""
     path = REPORT_DIR / f"run_{run_id}.json"
 
     if not path.is_file():
@@ -221,8 +227,8 @@ def execute_run(run_id, request_data):
     try:
         env = os.environ.copy()
 
-        # Allow the existing reporting code to associate its JSON report
-        # with this dashboard run, if it supports this environment variable.
+        # Associate the JSON report with this dashboard run,
+        # if the existing reporting code supports this variable.
         env["DASHBOARD_RUN_ID"] = run_id
 
         process = subprocess.Popen(
@@ -247,7 +253,7 @@ def execute_run(run_id, request_data):
 
         exit_code = process.wait()
 
-        # Parse the JUnit XML generated for this exact dashboard run.
+        # Parse the JUnit XML generated for this exact run.
         summary = read_report(run_id)
 
         if summary is None:
@@ -288,7 +294,7 @@ def execute_run(run_id, request_data):
 
 
 # ---------------------------------------------------------
-# API endpoints
+# General endpoints
 # ---------------------------------------------------------
 
 @app.get("/")
@@ -304,10 +310,18 @@ def health():
     }
 
 
+# ---------------------------------------------------------
+# Test-case endpoints
+# ---------------------------------------------------------
+
 @app.get("/api/test-cases")
 def test_cases():
     return discover_tests()
 
+
+# ---------------------------------------------------------
+# Run-history endpoints
+# ---------------------------------------------------------
 
 @app.get("/api/runs")
 def list_runs():
@@ -434,6 +448,10 @@ def get_logs(run_id: str):
         return {"logs": run["logs"]}
 
 
+# ---------------------------------------------------------
+# Artifact endpoints
+# ---------------------------------------------------------
+
 @app.get("/api/runs/{run_id}/artifacts")
 def artifacts(run_id: str):
     with lock:
@@ -449,9 +467,9 @@ def artifacts(run_id: str):
 
     files = []
 
-    # Videos and screenshots are currently listed from their output
-    # directories. They are not guaranteed to be uniquely attributable
-    # to this run until the recording naming convention is updated.
+    # Videos and screenshots are listed from their output folders.
+    # They may not be unique to this run until the recording
+    # naming convention is updated.
     for folder, artifact_type in (
         (VIDEO_DIR, "video"),
         (SCREENSHOT_DIR, "screenshot"),

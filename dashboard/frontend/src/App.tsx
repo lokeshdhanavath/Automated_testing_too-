@@ -6,14 +6,12 @@ import {
   Archive,
   Camera,
   CheckCircle2,
-  Check,
-  Code2,
-  FileCode2,
   ChevronDown,
   CircleAlert,
   Clock3,
   FileBarChart,
   FileText,
+  FolderKanban,
   FlaskConical,
   Gauge,
   HardDrive,
@@ -21,10 +19,13 @@ import {
   ListChecks,
   LoaderCircle,
   Play,
+  Plus,
+  Save,
+  Pencil,
+  Trash2,
+  X,
   RefreshCw,
   Search,
-  Save,
-  Plus,
   Settings2,
   SquareTerminal,
   Video,
@@ -37,19 +38,22 @@ import {
   startRun,
   getRunStatus,
   getRunLogs,
-  getScripts,
-  getScript,
-  createScript,
-  updateScript,
+  validateCsvScenarios,
+  executeCsvScenarios,
+  getProjects,
+  createProject,
+  updateProject,
+  deleteProject,
 } from "./services/api";
 
-import type { TestCase, TestScript } from "./services/api";
+import type { TestCase, CsvValidationResponse, ProjectConfig, ProjectPayload } from "./services/api";
 import "./App.css";
 
 type Page =
+  | "Projects"
   | "Dashboard"
   | "Test Suites"
-  | "Test Scripts"
+  | "CSV Scenarios"
   | "Test Execution"
   | "Reports"
   | "Video Recordings"
@@ -79,9 +83,10 @@ const navigation: {
   {
     section: "WORKSPACE",
     items: [
+      { label: "Projects", icon: FolderKanban },
       { label: "Dashboard", icon: LayoutDashboard },
       { label: "Test Suites", icon: ListChecks },
-      { label: "Test Scripts", icon: Code2 },
+      { label: "CSV Scenarios", icon: FileText },
       { label: "Test Execution", icon: Play },
     ],
   },
@@ -101,21 +106,38 @@ const navigation: {
 ];
 
 export default function App() {
-  const [page, setPage] = useState<Page>("Dashboard");
+  const [page, setPage] = useState<Page>("Projects");
   const [tests, setTests] = useState<TestCase[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [suite, setSuite] = useState("All Test Suites");
   const [search, setSearch] = useState("");
 
-  // Test script explorer/editor state
-  const [scripts, setScripts] = useState<TestScript[]>([]);
-  const [selectedScript, setSelectedScript] = useState<string>("");
-  const [scriptContent, setScriptContent] = useState("");
-  const [scriptLoading, setScriptLoading] = useState(false);
-  const [scriptSaving, setScriptSaving] = useState(false);
-  const [scriptError, setScriptError] = useState("");
-  const [scriptMessage, setScriptMessage] = useState("");
-  const [newScriptName, setNewScriptName] = useState("test_new_feature.py");
+  // Projects are persisted by FastAPI in a local JSON registry.
+  const [projects, setProjects] = useState<ProjectConfig[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState("apex-timesheet");
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectSaving, setProjectSaving] = useState(false);
+  const [projectError, setProjectError] = useState("");
+  const [projectMessage, setProjectMessage] = useState("");
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [projectFormOpen, setProjectFormOpen] = useState(false);
+  const emptyProjectForm: ProjectPayload = {
+    name: "", project_type: "Web application", base_url: "https://",
+    test_directory: "tests", default_environment: "QA", browser: "chromium",
+    headless: true, capture_screenshots: true, capture_video: false,
+    username_env_var: "", password_env_var: "",
+  };
+  const [projectForm, setProjectForm] = useState<ProjectPayload>(emptyProjectForm);
+  const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
+
+  // CSV scenario upload, validation, and selection state
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvValidation, setCsvValidation] = useState<CsvValidationResponse | null>(null);
+  const [selectedScenarioIds, setSelectedScenarioIds] = useState<string[]>([]);
+  const [csvLoading, setCsvLoading] = useState(false);
+  const [csvExecuting, setCsvExecuting] = useState(false);
+  const [csvError, setCsvError] = useState("");
+  const [csvMessage, setCsvMessage] = useState("");
 
   const [backendStatus, setBackendStatus] = useState("Checking...");
   const [loadingTests, setLoadingTests] = useState(true);
@@ -178,6 +200,95 @@ async function loadTests() {
   }
 }
 
+
+  async function refreshProjects() {
+    setProjectsLoading(true);
+    setProjectError("");
+    try {
+      const result = await getProjects();
+      setProjects(result);
+      setActiveProjectId((current) => result.some((project) => project.id === current)
+        ? current : (result[0]?.id ?? "apex-timesheet"));
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : "Unable to load projects.");
+    } finally {
+      setProjectsLoading(false);
+    }
+  }
+
+  function startAddProject() {
+    setEditingProjectId(null);
+    setProjectForm({ ...emptyProjectForm });
+    setProjectError("");
+    setProjectMessage("");
+    setProjectFormOpen(true);
+  }
+
+  function startEditProject(project: ProjectConfig) {
+    setEditingProjectId(project.id);
+    setProjectForm({
+      name: project.name,
+      project_type: project.project_type,
+      base_url: project.base_url,
+      test_directory: project.test_directory,
+      default_environment: project.default_environment,
+      browser: project.browser,
+      headless: project.headless,
+      capture_screenshots: project.capture_screenshots,
+      capture_video: project.capture_video,
+      username_env_var: project.username_env_var,
+      password_env_var: project.password_env_var,
+    });
+    setProjectError("");
+    setProjectMessage("");
+    setProjectFormOpen(true);
+  }
+
+  async function saveProject(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setProjectSaving(true);
+    setProjectError("");
+    setProjectMessage("");
+    try {
+      const saved = editingProjectId
+        ? await updateProject(editingProjectId, projectForm)
+        : await createProject(projectForm);
+      const refreshed = await getProjects();
+      setProjects(refreshed);
+      setActiveProjectId(saved.id);
+      setProjectFormOpen(false);
+      setProjectMessage(editingProjectId ? "Project settings updated." : "Project added successfully.");
+      addLog(`${editingProjectId ? "Updated" : "Added"} project: ${saved.name} (${saved.id}).`);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : "Unable to save project.");
+    } finally {
+      setProjectSaving(false);
+    }
+  }
+
+  async function removeProject(project: ProjectConfig) {
+    if (project.is_default) {
+      setProjectError("The default APEX Timesheet project cannot be deleted.");
+      return;
+    }
+    if (!window.confirm(`Delete project “${project.name}”? This removes its registry entry only, not its test files.`)) return;
+    setProjectError("");
+    setProjectMessage("");
+    try {
+      await deleteProject(project.id);
+      await refreshProjects();
+      setProjectMessage(`Project “${project.name}” was removed. Its files were not deleted.`);
+      addLog(`Removed project configuration: ${project.name}.`);
+    } catch (error) {
+      setProjectError(error instanceof Error ? error.message : "Unable to delete project.");
+    }
+  }
+
+  useEffect(() => {
+    void refreshProjects();
+    // Load persisted project registry once on startup.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     void loadTests();
@@ -300,87 +411,55 @@ async function loadTests() {
     );
   }
 
-  async function loadScripts(preferredFilename?: string) {
-    setScriptLoading(true);
-    setScriptError("");
-    setScriptMessage("");
+  async function validateSelectedCsv(file: File) {
+    setCsvFile(file);
+    setCsvValidation(null);
+    setSelectedScenarioIds([]);
+    setCsvError("");
+    setCsvMessage("");
+    setCsvLoading(true);
     try {
-      const result = await getScripts();
-      setScripts(result.scripts);
-      const target = preferredFilename ?? selectedScript ?? result.scripts[0]?.filename ?? "";
-      if (target && result.scripts.some((script) => script.filename === target)) {
-        await openScript(target);
-      } else if (!target && result.scripts.length > 0) {
-        await openScript(result.scripts[0].filename);
-      } else if (result.scripts.length === 0) {
-        setSelectedScript("");
-        setScriptContent("");
-      }
+      const result = await validateCsvScenarios(file);
+      setCsvValidation(result);
+      const rows = result.scenarios ?? [];
+      setSelectedScenarioIds(rows.filter((row) => row.valid !== false).map((row) => row.TC_ID ?? row.tc_id ?? row.id).filter((id): id is string => Boolean(id)));
+      setCsvMessage(result.valid ? `CSV validated: ${result.valid_rows ?? rows.length} valid scenario(s).` : "CSV loaded with validation errors. Review the messages below.");
+      addLog(`CSV validation completed for ${file.name}.`);
     } catch (error) {
-      setScriptError(error instanceof Error ? error.message : "Unable to load scripts.");
+      const message = error instanceof Error ? error.message : "Unable to validate CSV.";
+      setCsvError(message);
+      addLog(`CSV validation failed: ${message}`);
     } finally {
-      setScriptLoading(false);
+      setCsvLoading(false);
     }
   }
 
-  async function openScript(filename: string) {
-    setSelectedScript(filename);
-    setScriptError("");
-    setScriptMessage("");
-    try {
-      const result = await getScript(filename);
-      setScriptContent(result.content);
-      if (!result.syntax_valid && result.syntax_error) {
-        setScriptError(`Python syntax issue at line ${result.syntax_error.line ?? "?"}: ${result.syntax_error.message ?? "Invalid syntax"}`);
-      }
-    } catch (error) {
-      setScriptError(error instanceof Error ? error.message : "Unable to open script.");
-    }
+  function toggleScenario(id: string) {
+    setSelectedScenarioIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
   }
 
-  async function saveCurrentScript() {
-    if (!selectedScript || scriptSaving) return;
-    setScriptSaving(true);
-    setScriptError("");
-    setScriptMessage("");
+  async function executeSelectedCsv() {
+    if (!csvFile || selectedScenarioIds.length === 0 || csvExecuting || running) return;
+    setCsvExecuting(true);
+    setCsvError("");
+    setCsvMessage("");
     try {
-      const result = await updateScript(selectedScript, scriptContent);
-      await loadScripts(selectedScript);
-      setScriptMessage(result.message || "Script saved successfully.");
+      const response = await executeCsvScenarios(csvFile, selectedScenarioIds);
+      setCsvMessage(`Execution started. Run ID: ${response.run_id}`);
+      setRunning(true);
+      setRunStatus(response.status || "queued");
+      setRunSummary(null);
+      setElapsedSeconds(0);
+      setStartedAt(Date.now());
+      setActiveRunId(response.run_id);
+      addLog(`CSV execution started for ${selectedScenarioIds.length} scenario(s). Run ID: ${response.run_id}`);
+      setPage("Test Execution");
     } catch (error) {
-      setScriptError(error instanceof Error ? error.message : "Unable to save script.");
+      const message = error instanceof Error ? error.message : "Unable to execute selected CSV scenarios.";
+      setCsvError(message);
+      addLog(`CSV execution failed: ${message}`);
     } finally {
-      setScriptSaving(false);
-    }
-  }
-
-  async function makeNewScript() {
-    const filename = newScriptName.trim();
-    if (!filename) {
-      setScriptError("Enter a filename such as test_new_feature.py.");
-      return;
-    }
-    const safeFilename = filename.endsWith(".py") ? filename : `${filename}.py`;
-    const initialContent = `import pytest
-
-
-def test_new_feature(page):
-    \"\"\"Describe the expected behavior for this test.\"\"\"
-    # TODO: Add your Playwright steps and assertions.
-    assert True
-`;
-    setScriptSaving(true);
-    setScriptError("");
-    setScriptMessage("");
-    try {
-      const result = await createScript({ filename: safeFilename, content: initialContent });
-      setNewScriptName("test_new_feature.py");
-      await loadScripts(safeFilename);
-      setScriptMessage(result.message || `Created ${safeFilename}.`);
-    } catch (error) {
-      setScriptError(error instanceof Error ? error.message : "Unable to create script.");
-    } finally {
-      setScriptSaving(false);
+      setCsvExecuting(false);
     }
   }
 
@@ -423,7 +502,6 @@ def test_new_feature(page):
 
   function openPage(nextPage: Page) {
     setPage(nextPage);
-    if (nextPage === "Test Scripts") void loadScripts();
   }
 
   const passed = runSummary?.passed;
@@ -445,14 +523,18 @@ def test_new_feature(page):
 
   return (
     <div className="automation-app">
-      <aside className="sidebar">
+      {page !== "Projects" && <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
             <FlaskConical size={23} />
           </div>
           <div>
             <strong>Veriqon</strong>
+<<<<<<< HEAD
             <span>Automation Intelligence</span>
+=======
+            <span>Automation Platform</span>
+>>>>>>> 788987f (modified dashboard)
           </div>
         </div>
 
@@ -461,8 +543,8 @@ def test_new_feature(page):
             <Activity size={18} />
           </div>
           <div className="workspace-copy">
-            <strong>APEX Timesheet</strong>
-            <span>Playwright workspace</span>
+            <strong>{activeProject?.name ?? "No project selected"}</strong>
+            <span>{activeProject?.default_environment ?? "Project workspace"} workspace</span>
           </div>
           <ChevronDown size={16} />
         </div>
@@ -503,11 +585,11 @@ def test_new_feature(page):
               <span>API connection</span>
             </div>
           </div>
-          <div className="sidebar-version">TestPilot · Local workspace</div>
+          <div className="sidebar-version">Veriqon · Local workspace</div>
         </div>
-      </aside>
+      </aside>}
 
-      <div className="app-main">
+      <div className={`app-main ${page === "Projects" ? "project-picker-main" : ""}`}>
         <header className="topbar">
           <div className="breadcrumbs">
             <span>Automation</span>
@@ -516,6 +598,15 @@ def test_new_feature(page):
           </div>
 
           <div className="topbar-actions">
+            {page !== "Projects" && (
+              <button
+                className="button button-secondary button-small change-project-button"
+                onClick={() => { setProjectMessage(""); setProjectError(""); setProjectFormOpen(false); setPage("Projects"); }}
+                title="Return to the project selector"
+              >
+                <FolderKanban size={15} /> Change project
+              </button>
+            )}
             <span className="connection-label">
               <span
                 className={`status-dot ${
@@ -536,6 +627,75 @@ def test_new_feature(page):
         </header>
 
         <main className="page-content">
+          {page === "Projects" && (
+            <>
+              <div className="projects-brand" aria-label="Veriqon Automation Platform">
+                <div className="projects-brand-icon" aria-hidden="true">V</div>
+                <div className="projects-brand-copy">
+                  <strong>VERIQON</strong>
+                  <span>Automation Platform</span>
+                </div>
+              </div>
+
+              <PageHeader
+                eyebrow="YOUR WORKSPACES"
+                title="Choose a project"
+                description="Open a workspace to access its dashboard and automation tools. Test files and scenarios can be connected later."
+                action={<button type="button" className="button button-primary" onClick={startAddProject}><Plus size={16} /> Add project</button>}
+              />
+
+              {projectError && <div className="project-alert project-alert-error"><CircleAlert size={17} />{projectError}</div>}
+              {projectMessage && <div className="project-alert project-alert-success"><CheckCircle2 size={17} />{projectMessage}</div>}
+
+              {projectFormOpen && (
+                <section className="card project-form-card">
+                  <div className="project-form-heading">
+                    <div className="project-form-icon"><FolderKanban size={21} /></div>
+                    <div><h2>{editingProjectId ? "Edit project" : "Add a project"}</h2><p>Configure the application now. Test files and scenarios can be connected later.</p></div>
+                    <button type="button" className="project-icon-button" aria-label="Close form" onClick={() => setProjectFormOpen(false)}><X size={18} /></button>
+                  </div>
+                  <form onSubmit={(event) => void saveProject(event)}>
+                    <div className="project-form-grid">
+                      <label className="project-field"><span>Project name <b>*</b></span><input required maxLength={80} value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} placeholder="e.g. Customer Portal" /></label>
+                      <label className="project-field"><span>Application type</span><select value={projectForm.project_type} onChange={(event) => setProjectForm({ ...projectForm, project_type: event.target.value as ProjectPayload["project_type"] })}><option>Web application</option><option>API application</option><option>Full-stack application</option></select></label>
+                      <label className="project-field project-field-wide"><span>Base URL <b>*</b></span><input required type="url" value={projectForm.base_url} onChange={(event) => setProjectForm({ ...projectForm, base_url: event.target.value })} placeholder="https://application.example" /><small>Use the application under test URL, not the Veriqon API URL unless that is the app you intend to test.</small></label>
+                      <label className="project-field"><span>Test directory</span><input required value={projectForm.test_directory} onChange={(event) => setProjectForm({ ...projectForm, test_directory: event.target.value })} placeholder="tests" /><small>Relative path inside your workspace. It may be prepared later.</small></label>
+                      <label className="project-field"><span>Default environment</span><select value={projectForm.default_environment} onChange={(event) => setProjectForm({ ...projectForm, default_environment: event.target.value as ProjectPayload["default_environment"] })}><option>Development</option><option>QA</option><option>Staging</option><option>Production</option></select></label>
+                      <label className="project-field"><span>Default browser</span><select value={projectForm.browser} onChange={(event) => setProjectForm({ ...projectForm, browser: event.target.value as ProjectPayload["browser"] })}><option value="chromium">Chromium</option><option value="firefox">Firefox</option><option value="webkit">WebKit</option></select></label>
+                    </div>
+                    <div className="project-options">
+                      <label><input type="checkbox" checked={projectForm.headless} onChange={(event) => setProjectForm({ ...projectForm, headless: event.target.checked })} /><span><strong>Headless mode</strong><small>Run browser without opening a visible window</small></span></label>
+                      <label><input type="checkbox" checked={projectForm.capture_screenshots} onChange={(event) => setProjectForm({ ...projectForm, capture_screenshots: event.target.checked })} /><span><strong>Capture screenshots</strong><small>Project default for future test runs</small></span></label>
+                      <label><input type="checkbox" checked={projectForm.capture_video} onChange={(event) => setProjectForm({ ...projectForm, capture_video: event.target.checked })} /><span><strong>Capture video</strong><small>Project default for future test runs</small></span></label>
+                    </div>
+                    <div className="project-secrets-note"><Settings2 size={17} /><div><strong>Credential references (optional)</strong><p>Enter environment-variable names only. Passwords and tokens are never saved in this project JSON file.</p></div></div>
+                    <div className="project-form-grid project-credentials-grid">
+                      <label className="project-field"><span>Username environment variable</span><input value={projectForm.username_env_var} onChange={(event) => setProjectForm({ ...projectForm, username_env_var: event.target.value.replace(/[^A-Za-z0-9_]/g, "") })} placeholder="APEX_QA_USERNAME" /></label>
+                      <label className="project-field"><span>Password/token environment variable</span><input value={projectForm.password_env_var} onChange={(event) => setProjectForm({ ...projectForm, password_env_var: event.target.value.replace(/[^A-Za-z0-9_]/g, "") })} placeholder="APEX_QA_PASSWORD" /></label>
+                    </div>
+                    <div className="project-form-actions"><button type="button" className="button button-secondary" onClick={() => setProjectFormOpen(false)}>Cancel</button><button type="submit" className="button button-primary" disabled={projectSaving}>{projectSaving ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}{projectSaving ? "Saving…" : editingProjectId ? "Save changes" : "Add project"}</button></div>
+                  </form>
+                </section>
+              )}
+
+              <div className="projects-toolbar"><div><strong>{projects.length} registered project{projects.length === 1 ? "" : "s"}</strong><span>Stored locally in the backend JSON registry</span></div><button className="button button-secondary button-small" onClick={() => void refreshProjects()} disabled={projectsLoading}>{projectsLoading ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />} Refresh</button></div>
+              {projectsLoading && projects.length === 0 ? <section className="card projects-empty"><LoaderCircle className="spin" size={22} /><span>Loading projects…</span></section> : projects.length === 0 ? <section className="card projects-empty"><FolderKanban size={28} /><strong>No projects yet</strong><span>Add your first project to begin configuring its environment.</span></section> : (
+                <div className="projects-grid">
+                  {projects.map((project) => (
+                    <article className={`project-card ${project.id === activeProjectId ? "project-card-active" : ""}`} key={project.id}>
+                      <div className="project-card-top"><div className="project-card-icon"><FolderKanban size={21} /></div><span className={`project-status ${project.id === activeProjectId ? "project-status-active" : ""}`}>{project.id === activeProjectId ? "Active project" : "Registered"}</span></div>
+                      <h3>{project.name}</h3><p className="project-card-type">{project.project_type} · {project.default_environment}</p>
+                      <div className="project-card-url"><span>BASE URL</span><code title={project.base_url}>{project.base_url}</code></div>
+                      <div className="project-card-meta"><span><b>Test directory</b><code>{project.test_directory}</code></span><span><b>Browser</b><code>{project.browser}</code></span></div>
+                      <div className="project-card-footer"><button className="button button-primary button-small open-project-button" onClick={() => { setActiveProjectId(project.id); setProjectMessage(""); setProjectError(""); setPage("Dashboard"); }}><FolderKanban size={15} /> Open project <span aria-hidden="true">→</span></button><div><button className="project-icon-button" aria-label={`Edit ${project.name}`} title="Edit project" onClick={() => startEditProject(project)}><Pencil size={15} /></button><button className="project-icon-button project-delete-button" aria-label={`Delete ${project.name}`} title={project.is_default ? "Default project cannot be deleted" : "Delete project"} disabled={project.is_default} onClick={() => void removeProject(project)}><Trash2 size={15} /></button></div></div>
+                    </article>
+                  ))}
+                </div>
+              )}
+              <div className="project-rollout-note"><CircleAlert size={17} /><p><strong>Compatibility note:</strong> this phase persists project configuration and adds the management UI. The existing test discovery and runner remain unchanged and continue to run the current Timesheet suite. Project-specific test discovery and execution will be connected in a later phase, so registering a project does not require its tests to exist yet.</p></div>
+            </>
+          )}
+
           {page === "Dashboard" && (
             <>
               <PageHeader
@@ -893,105 +1053,78 @@ def test_new_feature(page):
             </>
           )}
 
-          {page === "Test Scripts" && (
+          {page === "CSV Scenarios" && (
             <>
               <PageHeader
-                eyebrow="SCRIPT WORKSPACE"
-                title="Test scripts"
-                description="Browse and edit the Python pytest scripts used by your Playwright automation suite."
-                action={
-                  <button className="button button-secondary" onClick={() => void loadScripts()} disabled={scriptLoading}>
-                    <RefreshCw size={16} /> Refresh scripts
-                  </button>
-                }
+                eyebrow="SCENARIO WORKSPACE"
+                title="CSV scenario runner"
+                description="Upload a scenario CSV, validate its structure, select supported scenarios, and run them through the existing Playwright/pytest runner."
               />
 
-              <div className="script-workspace">
-                <section className="card script-explorer">
-                  <div className="script-panel-heading">
+              <section className="card csv-upload-card">
+                <div className="csv-upload-heading">
+                  <div>
+                    <h3>Upload test scenarios</h3>
+                    <p>Required columns: TC_ID, Scenario, Preconditions, Steps, Expected_Result, Priority.</p>
+                  </div>
+                  <span className="csv-file-type">.CSV</span>
+                </div>
+                <label className="csv-file-drop" htmlFor="scenario-csv-file">
+                  <FileText size={25} />
+                  <strong>{csvFile ? csvFile.name : "Choose a CSV file"}</strong>
+                  <span>{csvFile ? `${(csvFile.size / 1024).toFixed(1)} KB · Choose another file to replace` : "Select a scenario CSV from your computer (max 2 MB)."}</span>
+                  <input id="scenario-csv-file" type="file" accept=".csv,text/csv" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void validateSelectedCsv(file); event.currentTarget.value = ""; }} />
+                </label>
+                <div className="csv-actions">
+                  <button className="button button-primary" disabled={!csvFile || csvLoading || csvExecuting} onClick={() => csvFile && void validateSelectedCsv(csvFile)}>
+                    {csvLoading ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}
+                    {csvLoading ? "Validating…" : "Validate CSV"}
+                  </button>
+                  <button className="button button-secondary" disabled={!csvFile || !csvValidation || selectedScenarioIds.length === 0 || csvExecuting || running} onClick={() => void executeSelectedCsv()}>
+                    {csvExecuting ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
+                    {csvExecuting ? "Starting…" : `Run selected (${selectedScenarioIds.length})`}
+                  </button>
+                </div>
+                {csvError && <div className="csv-message error"><CircleAlert size={16} />{csvError}</div>}
+                {csvMessage && <div className="csv-message success"><CheckCircle2 size={16} />{csvMessage}</div>}
+                {csvValidation?.errors?.length ? <div className="csv-validation-errors"><strong>Validation issues</strong><ul>{csvValidation.errors.map((error, index) => <li key={`${index}-${error}`}>{typeof error === "string" ? error : JSON.stringify(error)}</li>)}</ul></div> : null}
+              </section>
+
+              {csvValidation && (
+                <section className="card csv-scenarios-card">
+                  <div className="csv-scenarios-toolbar">
                     <div>
-                      <strong><FolderOpenIcon /> Test files</strong>
-                      <span>{scripts.length} scripts in tests/</span>
+                      <h3>Scenario selection</h3>
+                      <p>{csvValidation.total_rows ?? csvValidation.scenarios?.length ?? 0} row(s) · {csvValidation.valid_rows ?? 0} valid · {selectedScenarioIds.length} selected</p>
                     </div>
-                    <button className="icon-button" title="Refresh scripts" onClick={() => void loadScripts()} disabled={scriptLoading}>
-                      <RefreshCw size={15} />
-                    </button>
-                  </div>
-                  <div className="script-create-form">
-                    <input
-                      value={newScriptName}
-                      onChange={(event) => setNewScriptName(event.target.value)}
-                      aria-label="New Python test filename"
-                      placeholder="test_new_feature.py"
-                    />
-                    <button className="button button-primary button-small" onClick={() => void makeNewScript()} disabled={scriptSaving}>
-                      <Plus size={15} /> Create
-                    </button>
-                  </div>
-                  <div className="script-file-list">
-                    {scripts.map((script) => (
-                      <button
-                        key={script.filename}
-                        className={`script-file ${selectedScript === script.filename ? "selected" : ""}`}
-                        onClick={() => void openScript(script.filename)}
-                      >
-                        <FileCode2 size={17} />
-                        <span className="script-file-copy">
-                          <strong>{script.filename}</strong>
-                          <small>{script.test_count ?? 0} test functions · {formatBytes(script.size_bytes)}</small>
-                        </span>
-                        {selectedScript === script.filename && <span className="script-active-dot" />}
-                      </button>
-                    ))}
-                    {!scriptLoading && scripts.length === 0 && (
-                      <div className="script-list-empty">No test scripts found in the tests/ folder.</div>
-                    )}
-                  </div>
-                </section>
-
-                <section className="card script-editor-panel">
-                  <div className="script-editor-toolbar">
-                    <div className="script-editor-title">
-                      <Code2 size={18} />
-                      <div>
-                        <strong>{selectedScript || "No script selected"}</strong>
-                        <span>Python · tests/</span>
-                      </div>
+                    <div className="csv-selection-actions">
+                      <button className="button button-secondary button-small" onClick={() => setSelectedScenarioIds((csvValidation.scenarios ?? []).map((row) => row.TC_ID ?? row.tc_id ?? row.id).filter((id): id is string => Boolean(id) && (csvValidation.scenarios ?? []).some((row) => (row.TC_ID ?? row.tc_id ?? row.id) === id && row.valid !== false)))}>Select valid</button>
+                      <button className="button button-secondary button-small" onClick={() => setSelectedScenarioIds([])}>Clear</button>
                     </div>
-                    <button className="button button-primary" onClick={() => void saveCurrentScript()} disabled={!selectedScript || scriptSaving}>
-                      {scriptSaving ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}
-                      {scriptSaving ? "Saving…" : "Save changes"}
-                    </button>
                   </div>
-
-                  {scriptError && <div className="script-message error"><CircleAlert size={16} />{scriptError}</div>}
-                  {scriptMessage && <div className="script-message success"><Check size={16} />{scriptMessage}</div>}
-
-                  <div className="script-editor-meta">
-                    <span><span className="status-dot online" /> Python source</span>
-                    <span>Changes are saved to your local tests/ folder</span>
+                  <div className="table-wrap csv-table-wrap">
+                    <table className="data-table csv-scenarios-table">
+                      <thead><tr><th>Select</th><th>TC ID</th><th>Scenario</th><th>Preconditions</th><th>Steps</th><th>Expected result</th><th>Priority</th></tr></thead>
+                      <tbody>
+                        {(csvValidation.scenarios ?? []).map((row, index) => {
+                          const id = row.TC_ID ?? row.tc_id ?? row.id ?? `row-${index}`;
+                          const supported = row.valid !== false && Boolean(row.TC_ID ?? row.tc_id ?? row.id);
+                          return <tr key={`${id}-${index}`}>
+                            <td><input aria-label={`Select ${id}`} type="checkbox" checked={selectedScenarioIds.includes(id)} disabled={!supported} onChange={() => toggleScenario(id)} /></td>
+                            <td><strong>{id}</strong></td>
+                            <td>{row.Scenario ?? row.scenario ?? "—"}</td>
+                            <td>{row.Preconditions ?? row.preconditions ?? "—"}</td>
+                            <td>{row.Steps ?? row.steps ?? "—"}</td>
+                            <td>{row.Expected_Result ?? row.expected_result ?? "—"}</td>
+                            <td><span className={`priority-pill priority-${String(row.Priority ?? row.priority ?? "low").toLowerCase()}`}>{row.Priority ?? row.priority ?? "—"}</span></td>
+                          </tr>;
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                  <textarea
-                    className="python-editor"
-                    value={scriptContent}
-                    onChange={(event) => {
-                      setScriptContent(event.target.value);
-                      setScriptMessage("");
-                    }}
-                    spellCheck={false}
-                    aria-label="Python test script editor"
-                    placeholder={scriptLoading ? "Loading script…" : "Select a script from the left, or create a new one."}
-                    disabled={!selectedScript || scriptLoading}
-                  />
-                  <div className="script-editor-footer">
-                    <span>{scriptContent.split("").length} lines</span>
-                    <span>Save validates Python syntax on the backend</span>
-                  </div>
+                  <p className="csv-support-note"><CircleAlert size={15} /> Only scenario IDs configured in the backend mapping can execute. CSV descriptions are not automatically converted into Playwright steps.</p>
                 </section>
-              </div>
-              <div className="script-workspace-note">
-                <CircleAlert size={16} /> Edit carefully: saved scripts are real pytest files. Run them from Test Suites or Test Execution after saving.
-              </div>
+              )}
             </>
           )}
 
@@ -1366,21 +1499,12 @@ def test_new_feature(page):
         </main>
 
         <footer className="app-footer">
-          <span>TestPilot Automation Platform</span>
+          <span>Veriqon Automation Platform</span>
           <span>Playwright · Pytest · FastAPI</span>
         </footer>
       </div>
     </div>
   );
-}
-
-function FolderOpenIcon() {
-  return <FileText size={17} />;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
 function PageHeader({
