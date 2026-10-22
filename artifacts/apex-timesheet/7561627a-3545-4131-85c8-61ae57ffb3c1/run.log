@@ -1,0 +1,19 @@
+[2026-10-22 11:22:35 UTC] Starting execution for scenario: 'Engine Fixture Test 9aed72' (Run ID: 7561627a-3545-4131-85c8-61ae57ffb3c1)
+[2026-10-22 11:22:35 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-22 11:22:35 UTC] Browser: chromium (Headless: True)
+[2026-10-22 11:22:37 UTC] [RUNNING] Step 1: Open HTML fixture (action: navigate)
+[2026-10-22 11:22:37 UTC] Navigating to: file:///C:/Users/LOKESH~1.DHA/AppData/Local/Temp/tmpepul4pde.html
+[2026-10-22 11:22:39 UTC] [PASSED] Step 1 finished in 1587ms
+[2026-10-22 11:22:39 UTC] [RUNNING] Step 2: Assert Title (action: assert_title)
+[2026-10-22 11:22:39 UTC] [PASSED] Step 2 finished in 139ms
+[2026-10-22 11:22:39 UTC] [RUNNING] Step 3: Enter username (action: fill)
+[2026-10-22 11:22:40 UTC] [PASSED] Step 3 finished in 640ms
+[2026-10-22 11:22:40 UTC] [RUNNING] Step 4: Click button (action: click)
+[2026-10-22 11:22:40 UTC] [PASSED] Step 4 finished in 571ms
+[2026-10-22 11:22:40 UTC] [RUNNING] Step 5: Assert result message (action: assert_text)
+[2026-10-22 11:22:40 UTC] [PASSED] Step 5 finished in 33ms
+[2026-10-22 11:22:40 UTC] [RUNNING] Step 6: Capture final screenshot (action: capture_screenshot)
+[2026-10-22 11:22:40 UTC] Custom screenshot captured: step_6_custom.png
+[2026-10-22 11:22:40 UTC] [PASSED] Step 6 finished in 209ms
+[2026-10-22 11:22:41 UTC] Scenario execution completed with status: PASSED
+[2026-10-22 11:22:41 UTC] Summary: 6/6 passed, 0 failed, 0 skipped.

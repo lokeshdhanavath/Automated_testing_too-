@@ -1,17 +1,8 @@
 """
 Pytest configuration and shared fixtures for the Timesheet test suite.
 
-Two ways to get a browser page:
-
-1. `page`                       → fresh context, NOT logged in
-                                   (used by login tests)
-
-2. `timesheet_page_in_session`  → the SAME logged-in page reused for the whole
-                                   session, already on My Timesheet
-                                   (used by everything else — fast!)
-
-APEX binds its session to the ?session= URL parameter. We capture that token
-once after login and reuse it in every navigation.
+Supports project-aware browser launch (headless, browser selection),
+conditional screenshot capture, and Playwright video recording.
 """
 import os 
 import time
@@ -48,9 +39,16 @@ def playwright_instance():
 
 @pytest.fixture(scope="session")
 def browser(playwright_instance):
-    browser = playwright_instance.chromium.launch(
-        headless=False,
-        args=["--disable-blink-features=AutomationControlled"],
+    browser_type_name = config.BROWSER_NAME if config.BROWSER_NAME in ("chromium", "firefox", "webkit") else "chromium"
+    browser_type = getattr(playwright_instance, browser_type_name)
+
+    launch_args = []
+    if browser_type_name == "chromium":
+        launch_args.append("--disable-blink-features=AutomationControlled")
+
+    browser = browser_type.launch(
+        headless=config.HEADLESS,
+        args=launch_args,
     )
     yield browser
     browser.close()
@@ -62,16 +60,21 @@ def browser(playwright_instance):
 
 @pytest.fixture
 def context(browser, request):
-    ctx = browser.new_context(
-        viewport={"width": 1400, "height": 900},
-        record_video_dir=str(config.VIDEO_DIR),
-        record_video_size={"width": 1280, "height": 720},
-        user_agent=(
+    context_kwargs = {
+        "viewport": {"width": 1400, "height": 900},
+        "user_agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/122.0.0.0 Safari/537.36"
         ),
-    )
+    }
+
+    if config.CAPTURE_VIDEO:
+        config.VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+        context_kwargs["record_video_dir"] = str(config.VIDEO_DIR)
+        context_kwargs["record_video_size"] = {"width": 1280, "height": 720}
+
+    ctx = browser.new_context(**context_kwargs)
     yield ctx
     ctx.close()
 
@@ -120,16 +123,21 @@ def logged_in_page_obj(browser):
     APEX binds its session to the ?session=<token> URL parameter.
     We capture that token after login and reuse it in every navigation.
     """
-    ctx = browser.new_context(
-        viewport={"width": 1400, "height": 900},
-        record_video_dir=str(config.VIDEO_DIR),
-        record_video_size={"width": 1280, "height": 720},
-        user_agent=(
+    context_kwargs = {
+        "viewport": {"width": 1400, "height": 900},
+        "user_agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/122.0.0.0 Safari/537.36"
         ),
-    )
+    }
+
+    if config.CAPTURE_VIDEO:
+        config.VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+        context_kwargs["record_video_dir"] = str(config.VIDEO_DIR)
+        context_kwargs["record_video_size"] = {"width": 1280, "height": 720}
+
+    ctx = browser.new_context(**context_kwargs)
     page = ctx.new_page()
     page.set_default_timeout(30000)
 
@@ -164,7 +172,8 @@ def logged_in_page_obj(browser):
         video_path = ""
 
     ctx.close()
-    print(f"\n[teardown] Session video: {video_path}")
+    if video_path:
+        print(f"\n[teardown] Session video: {video_path}")
 
 
 @pytest.fixture
@@ -208,13 +217,20 @@ def timesheet_page_in_session(logged_in_page_obj, request):
     duration = round(time.time() - start, 2)
     report = getattr(page, "_test_report", {})
 
+    video_path = ""
+    try:
+        if page.video:
+            video_path = str(page.video.path())
+    except Exception:
+        video_path = ""
+
     RESULTS.append({
         "name": request.node.nodeid,
         "status": report.get("status", "passed"),
         "duration": duration,
         "error": report.get("error", ""),
         "screenshot": report.get("screenshot", ""),
-        "video": "",
+        "video": video_path,
         "state_changing": state_changing,
     })
 
@@ -265,19 +281,31 @@ def pytest_runtest_makereport(item, call):
         page._test_report = {}
 
     if report.when == "call":
+        safe_name = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in item.name)
+
         if report.passed:
             page._test_report["status"] = "passed"
+            if config.CAPTURE_SCREENSHOTS:
+                try:
+                    config.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+                    shot = config.SCREENSHOT_DIR / f"{safe_name}.png"
+                    page.screenshot(path=str(shot), full_page=True)
+                    page._test_report["screenshot"] = str(shot)
+                except Exception:
+                    pass
         elif report.failed:
             page._test_report["status"] = "failed"
             page._test_report["error"] = (
                 str(report.longrepr)[:2000] if report.longrepr else ""
             )
-            try:
-                shot = config.SCREENSHOT_DIR / f"FAIL_{item.name}.png"
-                page.screenshot(path=str(shot), full_page=True)
-                page._test_report["screenshot"] = str(shot)
-            except Exception:
-                pass
+            if config.CAPTURE_SCREENSHOTS:
+                try:
+                    config.SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+                    shot = config.SCREENSHOT_DIR / f"FAIL_{safe_name}.png"
+                    page.screenshot(path=str(shot), full_page=True)
+                    page._test_report["screenshot"] = str(shot)
+                except Exception:
+                    pass
         elif report.skipped:
             page._test_report["status"] = "skipped"
 

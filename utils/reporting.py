@@ -29,6 +29,10 @@ def write_reports(test_results: list, run_id: str = None):
         "platform": platform.platform(),
         "run_id": run_id,
         "timestamp": timestamp,
+        "browser": config.BROWSER_NAME,
+        "headless": config.HEADLESS,
+        "capture_screenshots": config.CAPTURE_SCREENSHOTS,
+        "capture_video": config.CAPTURE_VIDEO,
     }
 
     summary = {
@@ -44,10 +48,20 @@ def write_reports(test_results: list, run_id: str = None):
     }
 
     # ---------- JSON ----------
+    config.JSON_REPORT_DIR.mkdir(parents=True, exist_ok=True)
     json_path = config.JSON_REPORT_DIR / f"run_{run_id}.json"
-    json_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    json_data = json.dumps(summary, indent=2)
+    json_path.write_text(json_data, encoding="utf-8")
+
+    # Keep a copy in global reports directory for backwards compatibility
+    global_json_dir = config.ROOT / "reports" / "json"
+    global_json_dir.mkdir(parents=True, exist_ok=True)
+    global_json_path = global_json_dir / f"run_{run_id}.json"
+    if global_json_path != json_path:
+        global_json_path.write_text(json_data, encoding="utf-8")
 
     # ---------- CSV ----------
+    config.CSV_REPORT_DIR.mkdir(parents=True, exist_ok=True)
     csv_path = config.CSV_REPORT_DIR / f"run_{run_id}.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(
@@ -62,6 +76,7 @@ def write_reports(test_results: list, run_id: str = None):
             writer.writerow({k: r.get(k, "") for k in writer.fieldnames})
 
     # ---------- History (append one line per run) ----------
+    config.HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     history_path = config.HISTORY_DIR / "runs.jsonl"
     with history_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps({

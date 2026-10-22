@@ -1,0 +1,17 @@
+[2026-10-22 10:00:51 UTC] Starting execution for scenario: 'Engine Fixture Test' (Run ID: 7111d504-3fc3-4bb7-a9aa-8f9fb5ee7113)
+[2026-10-22 10:00:51 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-22 10:00:51 UTC] Browser: chromium (Headless: True)
+[2026-10-22 10:00:52 UTC] [RUNNING] Step 1: Open HTML fixture (action: navigate)
+[2026-10-22 10:00:52 UTC] Navigating to: https://oracleapex.com/ords/r/lokesh354/timesheet-application/file:///C:/Users/LOKESH~1.DHA/AppData/Local/Temp/tmptx6rytuu.html
+[2026-10-22 10:00:54 UTC] [PASSED] Step 1 finished in 2161ms
+[2026-10-22 10:00:54 UTC] [RUNNING] Step 2: Assert Title (action: assert_title)
+[2026-10-22 10:00:54 UTC] [ERROR] Step 2 failed: Expected title to contain 'Veriqon Engine Test', got 'Sorry, this page isn't available'
+[2026-10-22 10:00:55 UTC] Failure screenshot captured: failure_step_2.png
+[2026-10-22 10:00:55 UTC] Scenario failure policy is 'stop'. Aborting remaining steps.
+[2026-10-22 10:00:55 UTC] [SKIPPED] Step 3: Enter username
+[2026-10-22 10:00:55 UTC] [SKIPPED] Step 4: Click button
+[2026-10-22 10:00:55 UTC] [SKIPPED] Step 5: Assert result message
+[2026-10-22 10:00:55 UTC] [SKIPPED] Step 6: Capture final screenshot
+[2026-10-22 10:00:55 UTC] Video saved and registered: recording.webm
+[2026-10-22 10:00:55 UTC] Scenario execution completed with status: FAILED
+[2026-10-22 10:00:55 UTC] Summary: 1/6 passed, 1 failed, 4 skipped.

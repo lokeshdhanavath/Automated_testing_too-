@@ -5,18 +5,18 @@
       "id": "apex-timesheet",
       "name": "APEX Timesheet",
       "project_type": "Web application",
-      "base_url": "http://127.0.0.1:8000",
+      "base_url": "https://oracleapex.com/ords/r/lokesh354/timesheet-application",
       "test_directory": "tests",
       "default_environment": "QA",
       "browser": "chromium",
       "headless": true,
       "capture_screenshots": true,
-      "capture_video": false,
-      "username_env_var": "",
-      "password_env_var": "",
+      "capture_video": true,
+      "username_env_var": "APEX_USERNAME",
+      "password_env_var": "APEX_PASSWORD",
       "is_default": true,
       "created_at": "2026-10-16T08:58:58.090467+00:00",
-      "updated_at": "2026-10-16T08:58:58.090467+00:00"
+      "updated_at": "2026-10-22T05:20:00.000000+00:00"
     }
   ]
 }

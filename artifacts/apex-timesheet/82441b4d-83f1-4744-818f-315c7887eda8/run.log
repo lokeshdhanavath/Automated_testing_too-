@@ -1,0 +1,5 @@
+[2026-10-22 09:59:30 UTC] Starting execution for scenario: 'Engine Fixture Test' (Run ID: 82441b4d-83f1-4744-818f-315c7887eda8)
+[2026-10-22 09:59:30 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-22 09:59:30 UTC] Browser: chromium (Headless: True)
+[2026-10-22 09:59:32 UTC] [RUNNING] Step 1: Open HTML fixture (action: navigate)
+[2026-10-22 09:59:32 UTC] Navigating to: https://oracleapex.com/ords/r/lokesh354/timesheet-application/file:///C:/Users/LOKESH~1.DHA/AppData/Local/Temp/tmp81kw8byy.html

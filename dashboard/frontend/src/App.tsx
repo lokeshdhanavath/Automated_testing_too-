@@ -6,59 +6,81 @@ import {
   Archive,
   Camera,
   CheckCircle2,
-  ChevronDown,
   CircleAlert,
   Clock3,
+  Download,
+  ExternalLink,
+  Eye,
   FileBarChart,
   FileText,
-  FolderKanban,
+  Film,
   FlaskConical,
+  FolderKanban,
   Gauge,
   HardDrive,
+  KeyRound,
+  Layers,
   LayoutDashboard,
   ListChecks,
   LoaderCircle,
+  Pencil,
   Play,
   Plus,
-  Save,
-  Pencil,
-  Trash2,
-  X,
   RefreshCw,
+  Save,
   Search,
   Settings2,
   SquareTerminal,
+  Trash2,
   Video,
+  X,
   XCircle,
 } from "lucide-react";
 
 import {
+  API_BASE_URL,
   checkBackendHealth,
   getTestCases,
   startRun,
   getRunStatus,
   getRunLogs,
+  getProjectRuns,
+  getProjectArtifacts,
   validateCsvScenarios,
   executeCsvScenarios,
   getProjects,
   createProject,
   updateProject,
   deleteProject,
+  toggleProjectActive,
+  getRunStepResults,
 } from "./services/api";
 
-import type { TestCase, CsvValidationResponse, ProjectConfig, ProjectPayload } from "./services/api";
+import type {
+  TestCase,
+  CsvValidationResponse,
+  ProjectConfig,
+  ProjectPayload,
+  ArtifactItem,
+  RunRecord,
+  TestResultItem,
+  StepExecutionResult,
+} from "./services/api";
+import { CredentialsPanel } from "./components/CredentialsPanel";
+import { ScenarioBuilder } from "./components/ScenarioBuilder";
+import { ScenarioExecutionView } from "./components/ScenarioExecutionView";
 import "./App.css";
 
 type Page =
-  | "Projects"
-  | "Dashboard"
+  | "Applications"
+  | "Overview"
+  | "Scenario Builder"
+  | "Credentials"
   | "Test Suites"
   | "CSV Scenarios"
-  | "Test Execution"
-  | "Reports"
-  | "Video Recordings"
-  | "Screenshots"
-  | "Execution Logs"
+  | "Test Runs"
+  | "Test Evidence"
+  | "Screenshots & Recordings"
   | "Settings";
 
 type RunSummary = {
@@ -83,20 +105,24 @@ const navigation: {
   {
     section: "WORKSPACE",
     items: [
-      { label: "Projects", icon: FolderKanban },
-      { label: "Dashboard", icon: LayoutDashboard },
-      { label: "Test Suites", icon: ListChecks },
-      { label: "CSV Scenarios", icon: FileText },
-      { label: "Test Execution", icon: Play },
+      { label: "Overview", icon: LayoutDashboard },
+      { label: "Scenario Builder", icon: Layers },
+      { label: "Credentials", icon: KeyRound },
     ],
   },
   {
-    section: "ARTIFACTS",
+    section: "TESTING",
     items: [
-      { label: "Reports", icon: FileBarChart },
-      { label: "Video Recordings", icon: Video },
-      { label: "Screenshots", icon: Camera },
-      { label: "Execution Logs", icon: SquareTerminal },
+      { label: "Test Suites", icon: ListChecks },
+      { label: "CSV Scenarios", icon: FileText },
+      { label: "Test Runs", icon: Play },
+    ],
+  },
+  {
+    section: "EVIDENCE",
+    items: [
+      { label: "Test Evidence", icon: FileBarChart },
+      { label: "Screenshots & Recordings", icon: Camera },
     ],
   },
   {
@@ -106,11 +132,21 @@ const navigation: {
 ];
 
 export default function App() {
-  const [page, setPage] = useState<Page>("Projects");
+  const [page, setPage] = useState<Page>("Applications");
+  const [artifactTab, setArtifactTab] = useState<"Screenshots" | "Videos">("Screenshots");
   const [tests, setTests] = useState<TestCase[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [suite, setSuite] = useState("All Test Suites");
   const [search, setSearch] = useState("");
+
+  // Artifacts and Runs state for project isolation
+  const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
+  const [artifactsLoading, setArtifactsLoading] = useState(false);
+  const [selectedRunFilter, setSelectedRunFilter] = useState<string>("all");
+  const [previewImage, setPreviewImage] = useState<ArtifactItem | null>(null);
+  const [projectRuns, setProjectRuns] = useState<RunRecord[]>([]);
+  const [runTestResults, setRunTestResults] = useState<TestResultItem[]>([]);
+  const [stepResults, setStepResults] = useState<StepExecutionResult[]>([]);
 
   // Projects are persisted by FastAPI in a local JSON registry.
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
@@ -126,6 +162,8 @@ export default function App() {
     test_directory: "tests", default_environment: "QA", browser: "chromium",
     headless: true, capture_screenshots: true, capture_video: false,
     username_env_var: "", password_env_var: "",
+    description: "", test_timeout_seconds: 60,
+    navigation_timeout_seconds: 30, default_wait_ms: 500, auth_method: "form",
   };
   const [projectForm, setProjectForm] = useState<ProjectPayload>(emptyProjectForm);
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
@@ -168,7 +206,7 @@ export default function App() {
   }
 
   
-async function loadTests() {
+async function loadTests(projectId?: string) {
   setLoadingTests(true);
   setTestError("");
 
@@ -177,7 +215,7 @@ async function loadTests() {
     setBackendStatus("Connected");
     addLog(`Backend connected: ${health.application ?? "APEX API"}`);
 
-    const discovered = await getTestCases();
+    const discovered = await getTestCases(projectId ?? activeProjectId);
     setTests(discovered);
 
     // Keep only tests the user has already selected.
@@ -201,6 +239,77 @@ async function loadTests() {
 }
 
 
+  function formatBytes(bytes?: number | null): string {
+    if (!bytes || bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+  }
+
+  function formatTimestamp(isoStr?: string | null): string {
+    if (!isoStr) return "—";
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    } catch {
+      return isoStr;
+    }
+  }
+
+  async function loadArtifacts(type?: string) {
+    if (!activeProjectId) return;
+    setArtifactsLoading(true);
+    try {
+      const runId = selectedRunFilter === "all" ? undefined : selectedRunFilter;
+      const list = await getProjectArtifacts(activeProjectId, runId, type);
+      setArtifacts(list);
+    } catch (err) {
+      addLog(`Failed to load artifacts: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setArtifactsLoading(false);
+    }
+  }
+
+  async function loadProjectRuns() {
+    if (!activeProjectId) return;
+    try {
+      const runsList = await getProjectRuns(activeProjectId);
+      setProjectRuns(runsList);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function enableVideoRecording() {
+    if (!activeProject) return;
+    try {
+      await updateProject(activeProject.id, {
+        name: activeProject.name,
+        project_type: activeProject.project_type,
+        base_url: activeProject.base_url,
+        test_directory: activeProject.test_directory,
+        default_environment: activeProject.default_environment,
+        browser: activeProject.browser,
+        headless: activeProject.headless,
+        capture_screenshots: activeProject.capture_screenshots,
+        capture_video: true,
+        username_env_var: activeProject.username_env_var,
+        password_env_var: activeProject.password_env_var,
+      });
+      await refreshProjects();
+      addLog(`Video recording enabled for project: ${activeProject.name}`);
+    } catch (err) {
+      addLog(`Failed to enable video recording: ${err}`);
+    }
+  }
+
   async function refreshProjects() {
     setProjectsLoading(true);
     setProjectError("");
@@ -222,6 +331,7 @@ async function loadTests() {
     setProjectError("");
     setProjectMessage("");
     setProjectFormOpen(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function startEditProject(project: ProjectConfig) {
@@ -236,12 +346,30 @@ async function loadTests() {
       headless: project.headless,
       capture_screenshots: project.capture_screenshots,
       capture_video: project.capture_video,
-      username_env_var: project.username_env_var,
-      password_env_var: project.password_env_var,
+      username_env_var: project.username_env_var || "",
+      password_env_var: project.password_env_var || "",
+      description: project.description || "",
+      test_timeout_seconds: project.test_timeout_seconds || 60,
+      navigation_timeout_seconds: project.navigation_timeout_seconds || 30,
+      default_wait_ms: project.default_wait_ms || 500,
+      auth_method: project.auth_method || "form",
+      is_active: project.is_active ?? true,
     });
     setProjectError("");
     setProjectMessage("");
     setProjectFormOpen(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function handleToggleProjectActive(projectId: string) {
+    try {
+      const res = await toggleProjectActive(projectId);
+      await refreshProjects();
+      setProjectMessage(res.message);
+      addLog(`Application ${projectId} is now ${res.is_active ? "Active" : "Inactive"}.`);
+    } catch (err: any) {
+      setProjectError(err?.message || "Failed to toggle application status.");
+    }
   }
 
   async function saveProject(event: React.FormEvent<HTMLFormElement>) {
@@ -257,10 +385,10 @@ async function loadTests() {
       setProjects(refreshed);
       setActiveProjectId(saved.id);
       setProjectFormOpen(false);
-      setProjectMessage(editingProjectId ? "Project settings updated." : "Project added successfully.");
-      addLog(`${editingProjectId ? "Updated" : "Added"} project: ${saved.name} (${saved.id}).`);
+      setProjectMessage(editingProjectId ? "Application settings updated." : "Application added successfully.");
+      addLog(`${editingProjectId ? "Updated" : "Added"} application: ${saved.name} (${saved.id}).`);
     } catch (error) {
-      setProjectError(error instanceof Error ? error.message : "Unable to save project.");
+      setProjectError(error instanceof Error ? error.message : "Unable to save application.");
     } finally {
       setProjectSaving(false);
     }
@@ -268,27 +396,35 @@ async function loadTests() {
 
   async function removeProject(project: ProjectConfig) {
     if (project.is_default) {
-      setProjectError("The default APEX Timesheet project cannot be deleted.");
+      setProjectError("The default application cannot be deleted.");
       return;
     }
-    if (!window.confirm(`Delete project “${project.name}”? This removes its registry entry only, not its test files.`)) return;
+    if (!window.confirm(`Delete application “${project.name}”? This removes its configuration record only.`)) return;
     setProjectError("");
     setProjectMessage("");
     try {
       await deleteProject(project.id);
       await refreshProjects();
-      setProjectMessage(`Project “${project.name}” was removed. Its files were not deleted.`);
-      addLog(`Removed project configuration: ${project.name}.`);
+      setProjectMessage(`Application “${project.name}” was removed.`);
+      addLog(`Removed application configuration: ${project.name}.`);
     } catch (error) {
-      setProjectError(error instanceof Error ? error.message : "Unable to delete project.");
+      setProjectError(error instanceof Error ? error.message : "Unable to delete application.");
     }
   }
 
   useEffect(() => {
     void refreshProjects();
-    // Load persisted project registry once on startup.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (activeProjectId) {
+      void loadTests(activeProjectId);
+      void loadProjectRuns();
+      if (page === "Screenshots & Recordings") {
+        void loadArtifacts(artifactTab === "Videos" ? "video" : "screenshot");
+      }
+    }
+  }, [activeProjectId, page, selectedRunFilter, artifactTab]);
 
   useEffect(() => {
     void loadTests();
@@ -305,17 +441,25 @@ async function loadTests() {
 
     async function poll() {
       try {
-        const [status, logResult] = await Promise.all([
+        const [status, logResult, steps] = await Promise.all([
           getRunStatus(activeRunId!),
           getRunLogs(activeRunId!),
+          getRunStepResults(activeRunId!).catch(() => []),
         ]);
 
         if (cancelled) return;
 
         setRunStatus(status.status);
 
+        if (steps && steps.length > 0) {
+          setStepResults(steps);
+        }
+
         if (status.summary) {
           setRunSummary(status.summary);
+        }
+        if (status.test_results) {
+          setRunTestResults(status.test_results);
         }
 
         const currentLogs = logResult.logs ?? "";
@@ -336,10 +480,14 @@ async function loadTests() {
           setRunning(false);
           setRunStatus(status.status);
           if (status.summary) setRunSummary(status.summary);
+          if (status.test_results) setRunTestResults(status.test_results);
           addLog(`Run finished with status: ${status.status}`);
           if (status.exit_code !== undefined) {
             addLog(`Pytest exit code: ${status.exit_code}`);
           }
+          void loadProjectRuns();
+          void getRunStepResults(activeRunId!).then((st) => st.length && setStepResults(st)).catch(() => {});
+          if (page === "Screenshots & Recordings") void loadArtifacts(artifactTab === "Videos" ? "video" : "screenshot");
           return;
         }
       } catch (error) {
@@ -444,7 +592,7 @@ async function loadTests() {
     setCsvError("");
     setCsvMessage("");
     try {
-      const response = await executeCsvScenarios(csvFile, selectedScenarioIds);
+      const response = await executeCsvScenarios(csvFile, selectedScenarioIds, activeProjectId);
       setCsvMessage(`Execution started. Run ID: ${response.run_id}`);
       setRunning(true);
       setRunStatus(response.status || "queued");
@@ -453,7 +601,7 @@ async function loadTests() {
       setStartedAt(Date.now());
       setActiveRunId(response.run_id);
       addLog(`CSV execution started for ${selectedScenarioIds.length} scenario(s). Run ID: ${response.run_id}`);
-      setPage("Test Execution");
+      setPage("Test Runs");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to execute selected CSV scenarios.";
       setCsvError(message);
@@ -484,7 +632,7 @@ async function loadTests() {
     );
 
     try {
-      const response = await startRun({ test_ids: selected });
+      const response = await startRun({ project_id: activeProjectId, test_ids: selected });
       setActiveRunId(response.run_id);
       setRunStatus(response.status);
       addLog(`Run ID: ${response.run_id}`);
@@ -523,88 +671,124 @@ async function loadTests() {
 
   return (
     <div className="automation-app">
-      {page !== "Projects" && <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">
-            <FlaskConical size={23} />
-          </div>
-          <div>
-            <strong>Veriqon</strong>
-<<<<<<< HEAD
-            <span>Automation Intelligence</span>
-=======
-            <span>Automation Platform</span>
->>>>>>> 788987f (modified dashboard)
-          </div>
-        </div>
-
-        <div className="workspace-switcher">
-          <div className="workspace-icon">
-            <Activity size={18} />
-          </div>
-          <div className="workspace-copy">
-            <strong>{activeProject?.name ?? "No project selected"}</strong>
-            <span>{activeProject?.default_environment ?? "Project workspace"} workspace</span>
-          </div>
-          <ChevronDown size={16} />
-        </div>
-
-        <nav className="side-navigation">
-          {navigation.map((group) => (
-            <div className="nav-group" key={group.section}>
-              <div className="nav-section-label">{group.section}</div>
-              {group.items.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.label}
-                    className={`nav-item ${page === item.label ? "active" : ""}`}
-                    onClick={() => openPage(item.label)}
-                  >
-                    <Icon size={18} />
-                    <span>{item.label}</span>
-                    {item.label === "Test Suites" && (
-                      <span className="nav-count">{tests.length}</span>
-                    )}
-                  </button>
-                );
-              })}
+      {page !== "Applications" && (
+        <aside className="sidebar">
+          <div className="brand">
+            <div className="brand-mark">
+              <FlaskConical size={22} />
             </div>
-          ))}
-        </nav>
-
-        <div className="sidebar-bottom">
-          <div className="backend-indicator">
-            <span
-              className={`status-dot ${
-                backendStatus === "Connected" ? "online" : "offline"
-              }`}
-            />
             <div>
-              <strong>{backendStatus}</strong>
-              <span>API connection</span>
+              <strong>Veriqon</strong>
+              <span>Automation Platform</span>
             </div>
           </div>
-          <div className="sidebar-version">Veriqon · Local workspace</div>
-        </div>
-      </aside>}
 
-      <div className={`app-main ${page === "Projects" ? "project-picker-main" : ""}`}>
+          <div className="workspace-switcher" onClick={() => openPage("Applications")} title="Click to switch application">
+            <div className="workspace-icon">
+              <Activity size={18} />
+            </div>
+            <div className="workspace-copy">
+              <strong>{activeProject?.name ?? "No application selected"}</strong>
+              <span>{activeProject?.default_environment ?? "QA"} workspace</span>
+            </div>
+            <span
+              style={{
+                fontSize: "0.7rem",
+                padding: "2px 6px",
+                borderRadius: 4,
+                background: "rgba(255, 255, 255, 0.12)",
+                color: "#FFFFFF",
+                fontWeight: 600,
+              }}
+            >
+              Switch
+            </span>
+          </div>
+
+          <nav className="side-navigation">
+            {navigation.map((group) => (
+              <div className="nav-group" key={group.section}>
+                <div className="nav-section-label">{group.section}</div>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.label}
+                      className={`nav-item ${page === item.label ? "active" : ""}`}
+                      onClick={() => openPage(item.label)}
+                    >
+                      <Icon size={18} />
+                      <span>{item.label}</span>
+                      {item.label === "Test Suites" && (
+                        <span className="nav-count">{tests.length}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </nav>
+
+          <div className="sidebar-bottom">
+            <div className="backend-indicator">
+              <span
+                className={`status-dot ${
+                  backendStatus === "Connected" ? "online" : "offline"
+                }`}
+              />
+              <div>
+                <strong>{backendStatus}</strong>
+                <span>API connection</span>
+              </div>
+            </div>
+            <div className="sidebar-version">Veriqon v2.0 · Local workspace</div>
+          </div>
+        </aside>
+      )}
+
+      <div className={`app-main ${page === "Applications" ? "app-main-full" : ""}`}>
         <header className="topbar">
           <div className="breadcrumbs">
-            <span>Automation</span>
-            <span>/</span>
-            <strong>{page}</strong>
+            {page === "Applications" ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div className="brand-mark" style={{ width: 32, height: 32, borderRadius: 8 }}>
+                  <FlaskConical size={18} />
+                </div>
+                <strong style={{ fontSize: "1rem", letterSpacing: "-0.01em" }}>Veriqon Application Hub</strong>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span
+                  style={{ cursor: "pointer", color: "var(--v-accent)", fontWeight: 600 }}
+                  onClick={() => setPage("Applications")}
+                  title="Return to Applications Manager"
+                >
+                  Applications
+                </span>
+                <span>/</span>
+                <span style={{ fontWeight: 600, color: "var(--v-text)" }}>{activeProject?.name}</span>
+                <span>/</span>
+                <strong>{page}</strong>
+              </div>
+            )}
           </div>
 
           <div className="topbar-actions">
-            {page !== "Projects" && (
+            {page !== "Applications" ? (
               <button
-                className="button button-secondary button-small change-project-button"
-                onClick={() => { setProjectMessage(""); setProjectError(""); setProjectFormOpen(false); setPage("Projects"); }}
-                title="Return to the project selector"
+                className="button button-primary button-small change-project-button"
+                onClick={() => { setProjectMessage(""); setProjectError(""); setProjectFormOpen(false); setPage("Applications"); }}
+                title="Return to Applications Hub to choose or add another application"
               >
-                <FolderKanban size={15} /> Change project
+                <FolderKanban size={15} /> Change Application
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="button button-primary button-small"
+                onClick={startAddProject}
+              >
+                <Plus size={15} /> Add Application
               </button>
             )}
             <span className="connection-label">
@@ -627,21 +811,13 @@ async function loadTests() {
         </header>
 
         <main className="page-content">
-          {page === "Projects" && (
+          {page === "Applications" && (
             <>
-              <div className="projects-brand" aria-label="Veriqon Automation Platform">
-                <div className="projects-brand-icon" aria-hidden="true">V</div>
-                <div className="projects-brand-copy">
-                  <strong>VERIQON</strong>
-                  <span>Automation Platform</span>
-                </div>
-              </div>
-
               <PageHeader
-                eyebrow="YOUR WORKSPACES"
-                title="Choose a project"
-                description="Open a workspace to access its dashboard and automation tools. Test files and scenarios can be connected later."
-                action={<button type="button" className="button button-primary" onClick={startAddProject}><Plus size={16} /> Add project</button>}
+                eyebrow="APPLICATION REGISTRY"
+                title="Applications"
+                description="Manage applications under test, configure environments, timeouts, browser defaults, and encrypted credentials."
+                action={<button type="button" className="button button-primary" onClick={startAddProject}><Plus size={16} /> Add application</button>}
               />
 
               {projectError && <div className="project-alert project-alert-error"><CircleAlert size={17} />{projectError}</div>}
@@ -651,57 +827,175 @@ async function loadTests() {
                 <section className="card project-form-card">
                   <div className="project-form-heading">
                     <div className="project-form-icon"><FolderKanban size={21} /></div>
-                    <div><h2>{editingProjectId ? "Edit project" : "Add a project"}</h2><p>Configure the application now. Test files and scenarios can be connected later.</p></div>
+                    <div><h2>{editingProjectId ? "Edit application" : "Add an application"}</h2><p>Configure application parameters, execution environment, and credentials.</p></div>
                     <button type="button" className="project-icon-button" aria-label="Close form" onClick={() => setProjectFormOpen(false)}><X size={18} /></button>
                   </div>
                   <form onSubmit={(event) => void saveProject(event)}>
                     <div className="project-form-grid">
-                      <label className="project-field"><span>Project name <b>*</b></span><input required maxLength={80} value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} placeholder="e.g. Customer Portal" /></label>
+                      <label className="project-field"><span>Application name <b>*</b></span><input required maxLength={80} value={projectForm.name} onChange={(event) => setProjectForm({ ...projectForm, name: event.target.value })} placeholder="e.g. Customer Portal" /></label>
                       <label className="project-field"><span>Application type</span><select value={projectForm.project_type} onChange={(event) => setProjectForm({ ...projectForm, project_type: event.target.value as ProjectPayload["project_type"] })}><option>Web application</option><option>API application</option><option>Full-stack application</option></select></label>
-                      <label className="project-field project-field-wide"><span>Base URL <b>*</b></span><input required type="url" value={projectForm.base_url} onChange={(event) => setProjectForm({ ...projectForm, base_url: event.target.value })} placeholder="https://application.example" /><small>Use the application under test URL, not the Veriqon API URL unless that is the app you intend to test.</small></label>
-                      <label className="project-field"><span>Test directory</span><input required value={projectForm.test_directory} onChange={(event) => setProjectForm({ ...projectForm, test_directory: event.target.value })} placeholder="tests" /><small>Relative path inside your workspace. It may be prepared later.</small></label>
+                      <label className="project-field project-field-wide"><span>Base URL <b>*</b></span><input required type="url" value={projectForm.base_url} onChange={(event) => setProjectForm({ ...projectForm, base_url: event.target.value })} placeholder="https://application.example" /><small>The target URL of the application under test.</small></label>
+                      <label className="project-field project-field-wide"><span>Description</span><input maxLength={500} value={projectForm.description || ""} onChange={(event) => setProjectForm({ ...projectForm, description: event.target.value })} placeholder="Application overview, test scope, or notes" /></label>
+                      <label className="project-field"><span>Test directory</span><input required value={projectForm.test_directory} onChange={(event) => setProjectForm({ ...projectForm, test_directory: event.target.value })} placeholder="tests" /><small>Relative path inside your workspace.</small></label>
                       <label className="project-field"><span>Default environment</span><select value={projectForm.default_environment} onChange={(event) => setProjectForm({ ...projectForm, default_environment: event.target.value as ProjectPayload["default_environment"] })}><option>Development</option><option>QA</option><option>Staging</option><option>Production</option></select></label>
                       <label className="project-field"><span>Default browser</span><select value={projectForm.browser} onChange={(event) => setProjectForm({ ...projectForm, browser: event.target.value as ProjectPayload["browser"] })}><option value="chromium">Chromium</option><option value="firefox">Firefox</option><option value="webkit">WebKit</option></select></label>
+                      <label className="project-field"><span>Test timeout (seconds)</span><input type="number" min={5} max={600} value={projectForm.test_timeout_seconds || 60} onChange={(event) => setProjectForm({ ...projectForm, test_timeout_seconds: Number(event.target.value) })} /></label>
+                      <label className="project-field"><span>Navigation timeout (seconds)</span><input type="number" min={5} max={300} value={projectForm.navigation_timeout_seconds || 30} onChange={(event) => setProjectForm({ ...projectForm, navigation_timeout_seconds: Number(event.target.value) })} /></label>
+                      <label className="project-field"><span>Default wait (ms)</span><input type="number" min={0} max={10000} value={projectForm.default_wait_ms || 500} onChange={(event) => setProjectForm({ ...projectForm, default_wait_ms: Number(event.target.value) })} /></label>
                     </div>
+
                     <div className="project-options">
+                      <label><input type="checkbox" checked={projectForm.is_active !== false} onChange={(event) => setProjectForm({ ...projectForm, is_active: event.target.checked })} /><span><strong>Active application</strong><small>Enable running tests and scenarios against this application</small></span></label>
                       <label><input type="checkbox" checked={projectForm.headless} onChange={(event) => setProjectForm({ ...projectForm, headless: event.target.checked })} /><span><strong>Headless mode</strong><small>Run browser without opening a visible window</small></span></label>
-                      <label><input type="checkbox" checked={projectForm.capture_screenshots} onChange={(event) => setProjectForm({ ...projectForm, capture_screenshots: event.target.checked })} /><span><strong>Capture screenshots</strong><small>Project default for future test runs</small></span></label>
-                      <label><input type="checkbox" checked={projectForm.capture_video} onChange={(event) => setProjectForm({ ...projectForm, capture_video: event.target.checked })} /><span><strong>Capture video</strong><small>Project default for future test runs</small></span></label>
+                      <label><input type="checkbox" checked={projectForm.capture_screenshots} onChange={(event) => setProjectForm({ ...projectForm, capture_screenshots: event.target.checked })} /><span><strong>Capture screenshots</strong><small>Save visual evidence during test runs</small></span></label>
+                      <label><input type="checkbox" checked={projectForm.capture_video} onChange={(event) => setProjectForm({ ...projectForm, capture_video: event.target.checked })} /><span><strong>Capture video</strong><small>Record full browser session videos</small></span></label>
                     </div>
-                    <div className="project-secrets-note"><Settings2 size={17} /><div><strong>Credential references (optional)</strong><p>Enter environment-variable names only. Passwords and tokens are never saved in this project JSON file.</p></div></div>
+
+                    <div className="project-secrets-note"><Settings2 size={17} /><div><strong>Credential references (optional)</strong><p>Enter environment-variable names for fallback lookup, or configure encrypted credentials directly below.</p></div></div>
                     <div className="project-form-grid project-credentials-grid">
                       <label className="project-field"><span>Username environment variable</span><input value={projectForm.username_env_var} onChange={(event) => setProjectForm({ ...projectForm, username_env_var: event.target.value.replace(/[^A-Za-z0-9_]/g, "") })} placeholder="APEX_QA_USERNAME" /></label>
                       <label className="project-field"><span>Password/token environment variable</span><input value={projectForm.password_env_var} onChange={(event) => setProjectForm({ ...projectForm, password_env_var: event.target.value.replace(/[^A-Za-z0-9_]/g, "") })} placeholder="APEX_QA_PASSWORD" /></label>
                     </div>
-                    <div className="project-form-actions"><button type="button" className="button button-secondary" onClick={() => setProjectFormOpen(false)}>Cancel</button><button type="submit" className="button button-primary" disabled={projectSaving}>{projectSaving ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}{projectSaving ? "Saving…" : editingProjectId ? "Save changes" : "Add project"}</button></div>
+
+                    <div className="project-form-actions">
+                      <button type="button" className="button button-secondary" onClick={() => setProjectFormOpen(false)}>Cancel</button>
+                      <button type="submit" className="button button-primary" disabled={projectSaving}>
+                        {projectSaving ? <LoaderCircle className="spin" size={16} /> : <Save size={16} />}
+                        {projectSaving ? "Saving…" : editingProjectId ? "Save changes" : "Add application"}
+                      </button>
+                    </div>
+
+                    {editingProjectId && (
+                      <div style={{ marginTop: 28, borderTop: "1px solid var(--vq-border)", paddingTop: 20 }}>
+                        <CredentialsPanel projectId={editingProjectId} projectName={projectForm.name || "Application"} />
+                      </div>
+                    )}
                   </form>
                 </section>
               )}
 
-              <div className="projects-toolbar"><div><strong>{projects.length} registered project{projects.length === 1 ? "" : "s"}</strong><span>Stored locally in the backend JSON registry</span></div><button className="button button-secondary button-small" onClick={() => void refreshProjects()} disabled={projectsLoading}>{projectsLoading ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />} Refresh</button></div>
-              {projectsLoading && projects.length === 0 ? <section className="card projects-empty"><LoaderCircle className="spin" size={22} /><span>Loading projects…</span></section> : projects.length === 0 ? <section className="card projects-empty"><FolderKanban size={28} /><strong>No projects yet</strong><span>Add your first project to begin configuring its environment.</span></section> : (
+              <div className="projects-toolbar">
+                <div>
+                  <strong>{projects.length} registered application{projects.length === 1 ? "" : "s"}</strong>
+                  <span>Stored securely in PostgreSQL database</span>
+                </div>
+                <button className="button button-secondary button-small" onClick={() => void refreshProjects()} disabled={projectsLoading}>
+                  {projectsLoading ? <LoaderCircle className="spin" size={15} /> : <RefreshCw size={15} />} Refresh
+                </button>
+              </div>
+
+              {projectsLoading && projects.length === 0 ? (
+                <section className="card projects-empty"><LoaderCircle className="spin" size={22} /><span>Loading applications…</span></section>
+              ) : projects.length === 0 ? (
+                <section className="card projects-empty"><FolderKanban size={28} /><strong>No applications yet</strong><span>Add your first application to begin testing.</span></section>
+              ) : (
                 <div className="projects-grid">
                   {projects.map((project) => (
-                    <article className={`project-card ${project.id === activeProjectId ? "project-card-active" : ""}`} key={project.id}>
-                      <div className="project-card-top"><div className="project-card-icon"><FolderKanban size={21} /></div><span className={`project-status ${project.id === activeProjectId ? "project-status-active" : ""}`}>{project.id === activeProjectId ? "Active project" : "Registered"}</span></div>
-                      <h3>{project.name}</h3><p className="project-card-type">{project.project_type} · {project.default_environment}</p>
+                    <article className={`project-card ${project.id === activeProjectId ? "project-card-active" : ""}`} key={project.id} style={{ opacity: project.is_active === false ? 0.75 : 1 }}>
+                      <div className="project-card-top">
+                        <div className="project-card-icon"><FolderKanban size={21} /></div>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <span
+                            className="badge"
+                            style={{
+                              background: project.is_active !== false ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 68, 68, 0.12)",
+                              color: project.is_active !== false ? "#10B981" : "#EF4444",
+                              padding: "3px 9px",
+                              borderRadius: 6,
+                              fontSize: "0.75rem",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {project.is_active !== false ? "Active" : "Inactive"}
+                          </span>
+                          {project.id === activeProjectId && (
+                            <span className="project-status project-status-active">Selected</span>
+                          )}
+                        </div>
+                      </div>
+                      <h3>{project.name}</h3>
+                      <p className="project-card-type">{project.project_type} · {project.default_environment}</p>
                       <div className="project-card-url"><span>BASE URL</span><code title={project.base_url}>{project.base_url}</code></div>
                       <div className="project-card-meta"><span><b>Test directory</b><code>{project.test_directory}</code></span><span><b>Browser</b><code>{project.browser}</code></span></div>
-                      <div className="project-card-footer"><button className="button button-primary button-small open-project-button" onClick={() => { setActiveProjectId(project.id); setProjectMessage(""); setProjectError(""); setPage("Dashboard"); }}><FolderKanban size={15} /> Open project <span aria-hidden="true">→</span></button><div><button className="project-icon-button" aria-label={`Edit ${project.name}`} title="Edit project" onClick={() => startEditProject(project)}><Pencil size={15} /></button><button className="project-icon-button project-delete-button" aria-label={`Delete ${project.name}`} title={project.is_default ? "Default project cannot be deleted" : "Delete project"} disabled={project.is_default} onClick={() => void removeProject(project)}><Trash2 size={15} /></button></div></div>
+                      <div className="project-card-footer">
+                        <button className="button button-primary button-small open-project-button" onClick={() => { setActiveProjectId(project.id); setProjectMessage(""); setProjectError(""); setPage("Overview"); }}>
+                          <FolderKanban size={15} /> Open Workspace <span aria-hidden="true">→</span>
+                        </button>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            title={project.is_active !== false ? "Deactivate application" : "Activate application"}
+                            onClick={() => void handleToggleProjectActive(project.id)}
+                            style={{ fontSize: "0.75rem", padding: "4px 8px" }}
+                          >
+                            {project.is_active !== false ? "Deactivate" : "Activate"}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-secondary button-small"
+                            title="Manage encrypted credentials"
+                            onClick={() => { setActiveProjectId(project.id); setPage("Credentials"); }}
+                            style={{ padding: "4px 8px" }}
+                          >
+                            <KeyRound size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            className="project-icon-button"
+                            aria-label={`Edit ${project.name}`}
+                            title="Edit application configuration"
+                            onClick={() => startEditProject(project)}
+                          >
+                            <Pencil size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            className="project-icon-button project-delete-button"
+                            aria-label={`Delete ${project.name}`}
+                            title={project.is_default ? "Default application cannot be deleted" : "Delete application"}
+                            disabled={project.is_default}
+                            onClick={() => void removeProject(project)}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </div>
                     </article>
                   ))}
                 </div>
               )}
-              <div className="project-rollout-note"><CircleAlert size={17} /><p><strong>Compatibility note:</strong> this phase persists project configuration and adds the management UI. The existing test discovery and runner remain unchanged and continue to run the current Timesheet suite. Project-specific test discovery and execution will be connected in a later phase, so registering a project does not require its tests to exist yet.</p></div>
             </>
           )}
 
-          {page === "Dashboard" && (
+          {page === "Scenario Builder" && (
+            <ScenarioBuilder
+              projectId={activeProjectId}
+              projectName={activeProject?.name || "Current Application"}
+              onRunTriggered={(runId) => {
+                setActiveRunId(runId);
+                setRunning(true);
+                setElapsedSeconds(0);
+                setStartedAt(Date.now());
+                setStepResults([]);
+                setPage("Test Runs");
+              }}
+            />
+          )}
+
+          {page === "Credentials" && (
+            <CredentialsPanel
+              projectId={activeProjectId}
+              projectName={activeProject?.name || "Current Application"}
+            />
+          )}
+
+          {page === "Overview" && (
             <>
               <PageHeader
-                eyebrow="AUTOMATION OVERVIEW"
-                title="Testing dashboard"
-                description="Run your Playwright tests, track outcomes, and inspect execution evidence."
+                eyebrow="WORKSPACE OVERVIEW"
+                title="Overview"
+                description="Monitor test runs, track execution status, and inspect test evidence."
                 action={
                   <button
                     className="button button-primary"
@@ -830,7 +1124,7 @@ async function loadTests() {
                     action={
                       <button
                         className="text-button"
-                        onClick={() => openPage("Test Execution")}
+                        onClick={() => openPage("Test Runs")}
                       >
                         View details
                       </button>
@@ -922,7 +1216,7 @@ async function loadTests() {
                     action={
                       <button
                         className="text-button"
-                        onClick={() => openPage("Execution Logs")}
+                        onClick={() => openPage("Test Runs")}
                       >
                         View logs
                       </button>
@@ -1128,12 +1422,12 @@ async function loadTests() {
             </>
           )}
 
-          {page === "Test Execution" && (
+          {page === "Test Runs" && (
             <>
               <PageHeader
-                eyebrow="RUNNER"
-                title="Test execution"
-                description="Launch selected tests and monitor the live runner status."
+                eyebrow="EXECUTION"
+                title="Test Runs"
+                description="Launch test suites or visual scenarios and monitor live execution progress and step results."
               />
 
               <div className="dashboard-grid execution-page-grid">
@@ -1259,6 +1553,17 @@ async function loadTests() {
                 </section>
               </div>
 
+              {activeRunId && stepResults.length > 0 && (
+                <ScenarioExecutionView
+                  runId={activeRunId}
+                  stepResults={stepResults}
+                  status={runStatus}
+                  runSummary={runSummary}
+                  videoArtifact={artifacts.find((a) => a.artifact_type === "video" && a.run_id === activeRunId)}
+                  onPreviewImage={(item) => setPreviewImage(item)}
+                />
+              )}
+
               <section className="card section-gap">
                 <CardHeading
                   icon={<SquareTerminal />}
@@ -1278,12 +1583,12 @@ async function loadTests() {
             </>
           )}
 
-          {page === "Reports" && (
+          {page === "Test Evidence" && (
             <>
               <PageHeader
-                eyebrow="RESULTS"
-                title="Test reports"
-                description="Review the current run's summary and locate generated report files."
+                eyebrow="EVIDENCE"
+                title="Test Evidence"
+                description="Review test run outcomes, summary reports, and granular assertion results."
               />
 
               <div className="metric-grid">
@@ -1349,61 +1654,259 @@ async function loadTests() {
                     <code>{activeRunId}</code>
                   </div>
                 )}
+
+                {runTestResults.length > 0 && (
+                  <div style={{ marginTop: 24 }}>
+                    <h4 style={{ margin: "0 0 12px 0", color: "var(--vq-text)" }}>
+                      Individual Test Results ({runTestResults.length})
+                    </h4>
+                    <table className="test-results-table">
+                      <thead>
+                        <tr>
+                          <th>Status</th>
+                          <th>Test ID</th>
+                          <th>Duration</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {runTestResults.map((tr) => (
+                          <tr key={tr.id}>
+                            <td style={{ width: 110 }}>
+                              <span className={`status-badge-${tr.status.toLowerCase()}`}>
+                                {tr.status}
+                              </span>
+                            </td>
+                            <td>
+                              <code>{tr.test_id}</code>
+                              {tr.error_message && (
+                                <pre className="test-error-block">{tr.error_message}</pre>
+                              )}
+                            </td>
+                            <td style={{ width: 90, color: "var(--vq-muted)" }}>
+                              {tr.duration_seconds ? `${tr.duration_seconds.toFixed(2)}s` : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </section>
             </>
           )}
 
-          {page === "Video Recordings" && (
-            <ArtifactPage
-              icon={<Video />}
-              title="Video recordings"
-              description="Review Playwright videos captured during browser test execution."
-              note="The backend must return run-specific video paths and provide a safe way to serve them before recordings can be opened here."
-              onViewLogs={() => openPage("Execution Logs")}
-            />
-          )}
-
-          {page === "Screenshots" && (
-            <ArtifactPage
-              icon={<Camera />}
-              title="Screenshots"
-              description="Inspect screenshots captured during test execution and failures."
-              note="The current frontend does not yet retrieve or display screenshot file URLs from the artifacts endpoint."
-              onViewLogs={() => openPage("Execution Logs")}
-            />
-          )}
-
-          {page === "Execution Logs" && (
+          {page === "Screenshots & Recordings" && (
             <>
               <PageHeader
-                eyebrow="DIAGNOSTICS"
-                title="Execution logs"
-                description="Inspect the output received from the current run and dashboard."
+                eyebrow="EVIDENCE"
+                title="Screenshots & Recordings"
+                description={`Review Playwright test captures, screenshots, and browser recordings for ${activeProject?.name ?? "the selected application"}.`}
                 action={
-                  <button
-                    className="button button-secondary"
-                    onClick={() => setLogs([])}
-                  >
-                    Clear logs
-                  </button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      className="button button-secondary"
+                      onClick={() => void loadArtifacts(artifactTab === "Videos" ? "video" : "screenshot")}
+                    >
+                      <RefreshCw size={15} />
+                      Refresh {artifactTab.toLowerCase()}
+                    </button>
+                  </div>
                 }
               />
 
-              <section className="card">
-                <div className="log-meta">
-                  <span>
-                    <span
-                      className={`status-dot ${
-                        backendStatus === "Connected" ? "online" : "offline"
-                      }`}
-                    />
-                    Backend: {backendStatus}
-                  </span>
-                  <span>Run status: {runStatus}</span>
-                  {activeRunId && <code>{activeRunId}</code>}
+              <div className="tab-pill-bar">
+                <button
+                  type="button"
+                  className={`tab-pill ${artifactTab === "Screenshots" ? "active" : ""}`}
+                  onClick={() => setArtifactTab("Screenshots")}
+                >
+                  <Camera size={16} />
+                  Screenshots
+                </button>
+                <button
+                  type="button"
+                  className={`tab-pill ${artifactTab === "Videos" ? "active" : ""}`}
+                  onClick={() => setArtifactTab("Videos")}
+                >
+                  <Video size={16} />
+                  Video Recordings
+                </button>
+              </div>
+
+              {artifactTab === "Videos" && !activeProject?.capture_video && (
+                <div className="artifact-banner-notice">
+                  <div className="artifact-banner-copy">
+                    <CircleAlert size={18} color="#3b82f6" />
+                    <span>
+                      Video recording is currently <strong>disabled</strong> for <strong>{activeProject?.name}</strong>.
+                      Enable it to automatically save video recordings for upcoming test runs.
+                    </span>
+                  </div>
+                  <button className="button button-primary" onClick={() => void enableVideoRecording()}>
+                    <Film size={15} />
+                    Enable video recording
+                  </button>
                 </div>
-                <LogViewer logs={logs} />
-              </section>
+              )}
+
+              <div className="artifact-toolbar">
+                <div className="artifact-toolbar-left">
+                  <span className="artifact-filter-label">
+                    {artifactTab === "Videos" ? <Film size={15} /> : <Camera size={15} />}
+                    Filter by run:
+                  </span>
+                  <select
+                    className="artifact-filter-select"
+                    value={selectedRunFilter}
+                    onChange={(e) => setSelectedRunFilter(e.target.value)}
+                  >
+                    <option value="all">All runs ({projectRuns.length} runs recorded)</option>
+                    {projectRuns.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {formatTimestamp(r.created_at)} — {r.id?.slice(0, 8)} ({r.status})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="artifact-toolbar-right">
+                  <small style={{ color: "var(--vq-muted)" }}>
+                    {artifacts.length} {artifactTab === "Videos" ? "video recording" : "screenshot"}{artifacts.length === 1 ? "" : "s"} found
+                  </small>
+                </div>
+              </div>
+
+              {artifactsLoading ? (
+                <div style={{ textAlign: "center", padding: "60px 0" }}>
+                  <LoaderCircle className="spinner spin" size={28} />
+                  <p style={{ marginTop: 12, color: "var(--vq-muted)" }}>Loading {artifactTab.toLowerCase()}...</p>
+                </div>
+              ) : artifacts.length === 0 ? (
+                <section className="card artifact-empty-card">
+                  <EmptyState
+                    icon={artifactTab === "Videos" ? <Video /> : <Camera />}
+                    title={`No ${artifactTab.toLowerCase()} found`}
+                    description={
+                      artifactTab === "Videos"
+                        ? (!activeProject?.capture_video
+                            ? `Video capture is currently turned off for ${activeProject?.name}. Enable video recording above and run your tests.`
+                            : "No videos have been recorded yet for this application. Execute a test run to capture browser video recordings.")
+                        : "Screenshots captured during test execution or on failure will appear here."
+                    }
+                  />
+                  <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                    {artifactTab === "Videos" && !activeProject?.capture_video && (
+                      <button className="button button-primary" onClick={() => void enableVideoRecording()}>
+                        <Film size={15} />
+                        Enable video recording
+                      </button>
+                    )}
+                    <button className="button button-secondary" onClick={() => openPage("Test Suites")}>
+                      <Play size={15} />
+                      Run tests now
+                    </button>
+                  </div>
+                </section>
+              ) : artifactTab === "Videos" ? (
+                <div className="video-grid">
+                  {artifacts.map((art) => (
+                    <div key={art.id} className="video-card">
+                      <div className="video-player-wrap">
+                        <video
+                          controls
+                          preload="metadata"
+                          className="artifact-video-player"
+                          src={`${API_BASE_URL}${art.url}`}
+                        >
+                          Your browser does not support the video tag.
+                        </video>
+                      </div>
+                      <div className="video-card-body">
+                        <strong className="artifact-card-title" title={art.filename}>
+                          {art.filename}
+                        </strong>
+                        <div className="artifact-card-meta">
+                          <span>Run: <code>{art.run_id ? art.run_id.slice(0, 13) + "..." : "—"}</code></span>
+                          <span>Size: {formatBytes(art.size_bytes)} · {formatTimestamp(art.created_at)}</span>
+                        </div>
+                        <div className="artifact-card-actions">
+                          <a
+                            href={`${API_BASE_URL}${art.url}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="artifact-action-btn"
+                          >
+                            <ExternalLink size={13} />
+                            Open in tab
+                          </a>
+                          <a
+                            href={`${API_BASE_URL}${art.download_url}`}
+                            download={art.filename}
+                            className="artifact-action-btn"
+                          >
+                            <Download size={13} />
+                            Download
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="artifact-grid">
+                  {artifacts.map((art) => (
+                    <div key={art.id} className="artifact-card">
+                      <div className="artifact-thumb-wrap" onClick={() => setPreviewImage(art)}>
+                        <img
+                          src={`${API_BASE_URL}${art.url}`}
+                          alt={art.filename}
+                          className="artifact-thumb"
+                          loading="lazy"
+                        />
+                        <div className="artifact-thumb-overlay">
+                          <Eye size={16} />
+                          Preview
+                        </div>
+                      </div>
+                      <div className="artifact-card-body">
+                        <strong className="artifact-card-title" title={art.filename}>
+                          {art.filename}
+                        </strong>
+                        <div className="artifact-card-meta">
+                          <span>Run: <code>{art.run_id ? art.run_id.slice(0, 13) + "..." : "—"}</code></span>
+                          <span>Size: {formatBytes(art.size_bytes)} · {formatTimestamp(art.created_at)}</span>
+                        </div>
+                        <div className="artifact-card-actions">
+                          <button
+                            type="button"
+                            className="artifact-action-btn"
+                            onClick={() => setPreviewImage(art)}
+                          >
+                            <Eye size={13} />
+                            Preview
+                          </button>
+                          <a
+                            href={`${API_BASE_URL}${art.url}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="artifact-action-btn"
+                          >
+                            <ExternalLink size={13} />
+                            Full size
+                          </a>
+                          <a
+                            href={`${API_BASE_URL}${art.download_url}`}
+                            download={art.filename}
+                            className="artifact-action-btn"
+                          >
+                            <Download size={13} />
+                            Save
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
@@ -1497,6 +2000,55 @@ async function loadTests() {
             </>
           )}
         </main>
+
+      {previewImage && (
+        <div className="image-modal-backdrop" onClick={() => setPreviewImage(null)}>
+          <div className="image-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="image-modal-header">
+              <strong>{previewImage.filename}</strong>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => setPreviewImage(null)}
+                aria-label="Close preview"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="image-modal-body">
+              <img
+                src={`${API_BASE_URL}${previewImage.url}`}
+                alt={previewImage.filename}
+                className="image-modal-img"
+              />
+            </div>
+            <div className="image-modal-footer">
+              <span style={{ fontSize: 12, color: "var(--vq-muted)" }}>
+                Size: {formatBytes(previewImage.size_bytes)} · {formatTimestamp(previewImage.created_at)}
+              </span>
+              <div style={{ display: "flex", gap: 10 }}>
+                <a
+                  href={`${API_BASE_URL}${previewImage.url}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="artifact-action-btn"
+                >
+                  <ExternalLink size={14} />
+                  Open in new tab
+                </a>
+                <a
+                  href={`${API_BASE_URL}${previewImage.download_url}`}
+                  download={previewImage.filename}
+                  className="artifact-action-btn"
+                >
+                  <Download size={14} />
+                  Download
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
         <footer className="app-footer">
           <span>Veriqon Automation Platform</span>
@@ -1650,38 +2202,4 @@ function LogViewer({
   );
 }
 
-function ArtifactPage({
-  icon,
-  title,
-  description,
-  note,
-  onViewLogs,
-}: {
-  icon: ReactNode;
-  title: string;
-  description: string;
-  note: string;
-  onViewLogs: () => void;
-}) {
-  return (
-    <>
-      <PageHeader
-        eyebrow="EXECUTION ARTIFACTS"
-        title={title}
-        description={description}
-      />
 
-      <section className="card artifact-empty-card">
-        <EmptyState
-          icon={icon}
-          title="Artifact gallery not connected yet"
-          description={note}
-        />
-        <button className="button button-secondary" onClick={onViewLogs}>
-          <SquareTerminal size={16} />
-          Inspect execution logs
-        </button>
-      </section>
-    </>
-  );
-}

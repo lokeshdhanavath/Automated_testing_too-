@@ -1,0 +1,20 @@
+[2026-10-22 10:01:53 UTC] Starting execution for scenario: 'Engine Fixture Test 56d7c9' (Run ID: dedfadfc-fe5a-47bc-a77f-499ca7776e49)
+[2026-10-22 10:01:53 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-22 10:01:53 UTC] Browser: chromium (Headless: True)
+[2026-10-22 10:01:54 UTC] [RUNNING] Step 1: Open HTML fixture (action: navigate)
+[2026-10-22 10:01:54 UTC] Navigating to: file:///C:/Users/LOKESH~1.DHA/AppData/Local/Temp/tmp_07qltaa.html
+[2026-10-22 10:01:55 UTC] [PASSED] Step 1 finished in 953ms
+[2026-10-22 10:01:55 UTC] [RUNNING] Step 2: Assert Title (action: assert_title)
+[2026-10-22 10:01:55 UTC] [PASSED] Step 2 finished in 154ms
+[2026-10-22 10:01:55 UTC] [RUNNING] Step 3: Enter username (action: fill)
+[2026-10-22 10:01:55 UTC] [PASSED] Step 3 finished in 63ms
+[2026-10-22 10:01:55 UTC] [RUNNING] Step 4: Click button (action: click)
+[2026-10-22 10:01:55 UTC] [PASSED] Step 4 finished in 223ms
+[2026-10-22 10:01:55 UTC] [RUNNING] Step 5: Assert result message (action: assert_text)
+[2026-10-22 10:01:55 UTC] [PASSED] Step 5 finished in 31ms
+[2026-10-22 10:01:55 UTC] [RUNNING] Step 6: Capture final screenshot (action: capture_screenshot)
+[2026-10-22 10:01:55 UTC] Custom screenshot captured: step_6_custom.png
+[2026-10-22 10:01:55 UTC] [PASSED] Step 6 finished in 64ms
+[2026-10-22 10:01:56 UTC] Video saved and registered: recording.webm
+[2026-10-22 10:01:56 UTC] Scenario execution completed with status: PASSED
+[2026-10-22 10:01:56 UTC] Summary: 6/6 passed, 0 failed, 0 skipped.

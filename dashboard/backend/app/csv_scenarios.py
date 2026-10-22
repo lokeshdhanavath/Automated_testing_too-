@@ -1,8 +1,11 @@
-
 import csv
 import io
+import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+
+from app.database import SessionLocal
+from app import db_service
 
 router = APIRouter(prefix="/api/csv-scenarios", tags=["CSV Scenarios"])
 
@@ -18,7 +21,7 @@ REQUIRED_COLUMNS = [
 ALLOWED_PRIORITIES = {"HIGH", "MEDIUM", "LOW"}
 MAX_FILE_SIZE = 2 * 1024 * 1024  # 2 MB
 
-# Only map scenarios to existing, reviewed pytest tests.
+# Static fallback map for default APEX scenarios
 SCENARIO_TEST_MAP = {
     "TC-001": "tests/test_login.py::test_login_page_loads[chromium]",
     "TC-002": "tests/test_login.py::test_login_with_valid_credentials[chromium]",
@@ -28,8 +31,22 @@ SCENARIO_TEST_MAP = {
 }
 
 
+def _get_project_mapping(project_id: str | None = None) -> dict[str, str]:
+    db = SessionLocal()
+    try:
+        project = db_service.resolve_project(db, project_id)
+        db_mappings = db_service.get_scenario_mappings(db, project["id"])
+        # Merge with fallback
+        return {**SCENARIO_TEST_MAP, **db_mappings}
+    finally:
+        db.close()
+
+
 @router.post("/validate")
-async def validate_csv(file: UploadFile = File(...)):
+async def validate_csv(
+    file: UploadFile = File(...),
+    project_id: str | None = Form(None),
+):
     """Validate CSV structure, rows, and approved test mappings."""
 
     if not file.filename or not file.filename.lower().endswith(".csv"):
@@ -47,7 +64,7 @@ async def validate_csv(file: UploadFile = File(...)):
         )
 
     try:
-        text = content.decode("utf-8-sig")
+        text_content = content.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise HTTPException(
             status_code=400,
@@ -55,7 +72,7 @@ async def validate_csv(file: UploadFile = File(...)):
         ) from exc
 
     try:
-        reader = csv.DictReader(io.StringIO(text, newline=""))
+        reader = csv.DictReader(io.StringIO(text_content, newline=""))
 
         if not reader.fieldnames:
             raise HTTPException(
@@ -85,6 +102,8 @@ async def validate_csv(file: UploadFile = File(...)):
                     "required_columns": REQUIRED_COLUMNS,
                 },
             )
+
+        scenario_map = _get_project_mapping(project_id)
 
         scenarios = []
         errors = []
@@ -134,41 +153,34 @@ async def validate_csv(file: UploadFile = File(...)):
                     "messages": row_errors,
                 })
 
-            mapped = tc_id in SCENARIO_TEST_MAP
+            mapped = tc_id in scenario_map
             row_valid = len(row_errors) == 0
 
             # Extra response fields help the UI distinguish
-            # CSV validity from whether a test can be executed.
-            row["valid"] = row_valid
-            row["validation_errors"] = row_errors
-            row["mapped"] = mapped
-            row["runnable"] = row_valid and mapped
+            # between invalid structure and missing test mappings.
+            scenarios.append({
+                **row,
+                "valid": row_valid,
+                "mapped": mapped,
+                "pytest_id": scenario_map.get(tc_id),
+            })
 
-            scenarios.append(row)
-
-        total_rows = len(scenarios)
-        valid_rows = sum(
-            1 for scenario in scenarios if scenario["valid"]
-        )
-        runnable_rows = sum(
-            1 for scenario in scenarios if scenario["runnable"]
-        )
+        valid_rows = sum(1 for item in scenarios if item["valid"])
 
         return {
-            "valid": total_rows > 0 and len(errors) == 0,
+            "valid": len(errors) == 0 and len(scenarios) > 0,
             "filename": file.filename,
-            "total_rows": total_rows,
+            "total_rows": len(scenarios),
             "valid_rows": valid_rows,
-            "runnable_rows": runnable_rows,
             "errors": errors,
-            "columns": REQUIRED_COLUMNS,
+            "columns": headers,
             "scenarios": scenarios,
         }
 
     except csv.Error as exc:
         raise HTTPException(
             status_code=400,
-            detail=f"Unable to parse CSV: {exc}",
+            detail=f"CSV parsing error: {exc}",
         ) from exc
 
 
@@ -176,10 +188,11 @@ async def validate_csv(file: UploadFile = File(...)):
 async def execute_csv_scenarios(
     file: UploadFile = File(...),
     selected_tc_ids: list[str] = Form(...),
+    project_id: str | None = Form(None),
 ):
     """Run selected scenarios that have valid rows and approved mappings."""
 
-    validation = await validate_csv(file)
+    validation = await validate_csv(file, project_id=project_id)
 
     if not validation["valid"]:
         raise HTTPException(
@@ -258,16 +271,18 @@ async def execute_csv_scenarios(
             },
         )
 
+    scenario_map = _get_project_mapping(project_id)
+
     # Keep the user's selected order.
     pytest_ids = [
-        SCENARIO_TEST_MAP[tc_id]
+        scenario_map[tc_id]
         for tc_id in normalized_ids
     ]
 
-    # Reuse the existing dashboard test-run lifecycle.
+    # Reuse the existing dashboard test-run lifecycle with project context.
     from app.main import RunRequest, start_run
 
-    result = start_run(RunRequest(test_ids=pytest_ids))
+    result = start_run(RunRequest(project_id=project_id, test_ids=pytest_ids))
 
     return {
         **result,
