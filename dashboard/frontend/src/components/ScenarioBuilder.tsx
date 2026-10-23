@@ -1,1219 +1,2058 @@
 import React, { useEffect, useState } from "react";
 import {
-  Layers,
-  Plus,
+  Globe,
+  LogIn,
+  Compass,
+  FormInput,
+  MousePointerClick,
+  ListFilter,
+  CheckCircle2,
+  Clock,
   Play,
+  Plus,
   Pencil,
   Trash2,
+  Copy,
   ArrowUp,
   ArrowDown,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
-  ShieldCheck,
-  Search,
-  Database,
+  RefreshCw,
+  Eye,
+  EyeOff,
+  Settings2,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  Layers,
+  Check,
   X,
-  PlayCircle,
   FileCode,
-  LogIn,
+  Bookmark,
+  AlertCircle,
+  Square,
+  MousePointer,
 } from "lucide-react";
 import {
   getProjectScenarios,
-  getScenarioDetails,
   createScenario,
-  updateScenario,
-  deleteScenario,
-  runScenario,
   getProjectCredentials,
-  getProjectDataProfiles,
-  createProjectDataProfile,
-  deleteProjectDataProfile,
+  runDynamicWorkflow,
 } from "../services/api";
 import type {
   ScenarioItem,
-  ScenarioPayload,
   ScenarioStep,
   CredentialItem,
-  DataProfileItem,
+  ProjectConfig,
+  InspectElement,
 } from "../services/api";
+import { ElementPickerModal } from "./ElementPickerModal";
 
 interface ScenarioBuilderProps {
   projectId: string;
   projectName: string;
+  baseUrl?: string;
+  projects?: ProjectConfig[];
+  onSelectProject?: (projectId: string) => void;
+  onNavigateToCredentials?: () => void;
+  onNavigateToApplications?: () => void;
   onRunTriggered: (runId: string) => void;
+  running?: boolean;
+  onStopRun?: () => void;
 }
 
-const ACTION_TYPES = [
-  { value: "navigate", label: "Open page (URL / path)", hasLocator: false, hasParam: true, paramLabel: "URL or Path", placeholder: "/timesheet or https://..." },
-  { value: "login", label: "Perform login (Auto-fill credentials vault)", hasLocator: false, hasParam: false },
-  { value: "click", label: "Click element", hasLocator: true, hasParam: false },
-  { value: "fill", label: "Enter text (fill input)", hasLocator: true, hasParam: true, paramLabel: "Text or Variable", placeholder: "e.g. {{username}} or text" },
-  { value: "type", label: "Type text (keystrokes)", hasLocator: true, hasParam: true, paramLabel: "Text to type", placeholder: "e.g. 8.0" },
-  { value: "clear", label: "Clear text", hasLocator: true, hasParam: false },
-  { value: "press_key", label: "Press key", hasLocator: false, hasParam: true, paramLabel: "Key (e.g. Enter, Tab, Escape)", placeholder: "Enter" },
-  { value: "select_option", label: "Select dropdown option", hasLocator: true, hasParam: true, paramLabel: "Option label or value", placeholder: "e.g. Project-Alpha" },
-  { value: "check", label: "Check checkbox", hasLocator: true, hasParam: false },
-  { value: "uncheck", label: "Uncheck checkbox", hasLocator: true, hasParam: false },
-  { value: "hover", label: "Hover over element", hasLocator: true, hasParam: false },
-  { value: "wait_for_timeout", label: "Pause / wait (ms)", hasLocator: false, hasParam: true, paramLabel: "Milliseconds to wait", placeholder: "1000" },
-  { value: "wait_for_selector", label: "Wait for element to appear", hasLocator: true, hasParam: false },
-  { value: "wait_for_navigation", label: "Wait for page load", hasLocator: false, hasParam: false },
-  { value: "assert_visible", label: "Verify element is visible", hasLocator: true, hasParam: false },
-  { value: "assert_hidden", label: "Verify element is hidden", hasLocator: true, hasParam: false },
-  { value: "assert_text", label: "Verify element contains text", hasLocator: true, hasParam: true, paramLabel: "Expected text", placeholder: "Welcome" },
-  { value: "assert_value", label: "Verify input value", hasLocator: true, hasParam: true, paramLabel: "Expected value", placeholder: "Expected value" },
-  { value: "assert_title", label: "Verify page title", hasLocator: false, hasParam: true, paramLabel: "Expected title", placeholder: "Dashboard" },
-  { value: "assert_url", label: "Verify URL substring", hasLocator: false, hasParam: true, paramLabel: "Expected URL substring", placeholder: "/timesheet" },
-  { value: "capture_screenshot", label: "Capture screenshot", hasLocator: false, hasParam: false },
+export interface ActionDef {
+  type: string;
+  name: string;
+  shortDesc: string;
+  icon: React.ElementType;
+}
+
+export const REUSABLE_ACTIONS: ActionDef[] = [
+  {
+    type: "open_app",
+    name: "Open Application",
+    shortDesc: "Opens the application's base URL automatically.",
+    icon: Globe,
+  },
+  {
+    type: "login",
+    name: "Login",
+    shortDesc: "Authenticates using saved vault credentials without re-entering passwords.",
+    icon: LogIn,
+  },
+  {
+    type: "navigate",
+    name: "Navigate",
+    shortDesc: "Navigates to a page path or clicks an in-app menu item.",
+    icon: Compass,
+  },
+  {
+    type: "fill_input",
+    name: "Fill Input",
+    shortDesc: "Enters text or data into a form input or search field.",
+    icon: FormInput,
+  },
+  {
+    type: "click_element",
+    name: "Click Element",
+    shortDesc: "Clicks a button, link, checkbox, or tab control.",
+    icon: MousePointerClick,
+  },
+  {
+    type: "select_option",
+    name: "Select Option",
+    shortDesc: "Selects an item from a dropdown list by label or value.",
+    icon: ListFilter,
+  },
+  {
+    type: "verify_element",
+    name: "Verify Element",
+    shortDesc: "Asserts element visibility, text, input value, or URL.",
+    icon: CheckCircle2,
+  },
+  {
+    type: "wait_for_element",
+    name: "Wait for Element",
+    shortDesc: "Pauses for element state (visible/hidden) or duration.",
+    icon: Clock,
+  },
 ];
 
-const LOCATOR_TYPES = [
+const LOCATOR_STRATEGIES = [
+  { value: "smart", label: "Smart Dynamic (Auto-Detect Role/Label/Selector)" },
+  { value: "role", label: "Accessible Role & Name (e.g. textbox:Username, button:Submit)" },
+  { value: "label", label: "Field Label (e.g. Username, Email, Password)" },
+  { value: "placeholder", label: "Placeholder Text (e.g. Enter your name)" },
+  { value: "text", label: "Visible Button/Link Text" },
   { value: "css", label: "CSS Selector" },
-  { value: "id", label: "Element ID" },
-  { value: "name", label: "Name Attribute" },
-  { value: "text", label: "Visible Text" },
-  { value: "placeholder", label: "Placeholder" },
-  { value: "label", label: "Form Label" },
-  { value: "testid", label: "Test ID (data-testid)" },
-  { value: "xpath", label: "XPath" },
-  { value: "role", label: "ARIA Role" },
+  { value: "xpath", label: "XPath Expression" },
 ];
 
 export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
   projectId,
   projectName,
+  baseUrl,
+  projects = [],
+  onSelectProject,
+  onNavigateToCredentials,
+  onNavigateToApplications,
   onRunTriggered,
+  running = false,
+  onStopRun,
 }) => {
-  const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
+  // Application credentials & status
   const [credentials, setCredentials] = useState<CredentialItem[]>([]);
-  const [dataProfiles, setDataProfiles] = useState<DataProfileItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [credentialsLoading, setCredentialsLoading] = useState(false);
+  const [savedWorkflows, setSavedWorkflows] = useState<ScenarioItem[]>([]);
 
-  // Editor mode state
-  const [isEditing, setIsEditing] = useState(false);
-  const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Workflow builder state
+  const [workflowName, setWorkflowName] = useState("Dynamic Browser Workflow");
+  const [workflowSteps, setWorkflowSteps] = useState<ScenarioStep[]>([
+    {
+      step_order: 1,
+      action_type: "open_app",
+      description: "Open application base URL",
+      locator_value: "",
+      action_params: {},
+      is_enabled: true,
+    },
+    {
+      step_order: 2,
+      action_type: "login",
+      description: "Login with vault credentials",
+      locator_value: "",
+      action_params: {},
+      is_enabled: true,
+    },
+  ]);
 
-  // Scenario form fields
-  const [formName, setFormName] = useState("");
-  const [formDescription, setFormDescription] = useState("");
-  const [formTags, setFormTags] = useState("");
-  const [formPolicy, setFormPolicy] = useState<"stop" | "continue">("stop");
-  const [formTimeout, setFormTimeout] = useState(60);
-  const [formEnv, setFormEnv] = useState("QA");
-  const [formCredentialId, setFormCredentialId] = useState<string>("");
-  const [formSteps, setFormSteps] = useState<ScenarioStep[]>([]);
+  // Modal / Editing states
+  const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
+  const [stepModalOpen, setStepModalOpen] = useState(false);
+  const [modalStepData, setModalStepData] = useState<ScenarioStep>({
+    step_order: 1,
+    action_type: "open_app",
+    locator_type: "smart",
+    locator_value: "",
+    action_params: {},
+    description: "",
+    is_enabled: true,
+  });
+  const [showAdvancedLocators, setShowAdvancedLocators] = useState(false);
 
-  // Execution modal state
-  const [execModalScenario, setExecModalScenario] = useState<ScenarioItem | null>(null);
-  const [execEnv, setExecEnv] = useState("QA");
-  const [execCredId, setExecCredId] = useState<string>("");
-  const [execDataProfileId, setExecDataProfileId] = useState<string>("");
-  const [execStarting, setExecStarting] = useState(false);
+  // Element Picker states
+  const [elementPickerOpen, setElementPickerOpen] = useState(false);
+  const [currentPickingTarget, setCurrentPickingTarget] = useState<string>("main");
+  const [navigateMethod, setNavigateMethod] = useState<"menu" | "url">("menu");
 
-  // Data Profiles modal state
-  const [dataProfilesModalOpen, setDataProfilesModalOpen] = useState(false);
-  const [newProfileName, setNewProfileName] = useState("");
-  const [newProfileRowsJson, setNewProfileRowsJson] = useState('[\n  {"user": "tester", "role": "admin"}\n]');
+  function handlePickedElement(el: InspectElement) {
+    if (currentPickingTarget === "username") {
+      setModalStepData({
+        ...modalStepData,
+        action_params: {
+          ...modalStepData.action_params,
+          username_locator: el.locator_value,
+          username_locator_type: el.locator_strategy,
+          username_friendly_name: el.friendly_name,
+        },
+      });
+    } else if (currentPickingTarget === "password") {
+      setModalStepData({
+        ...modalStepData,
+        action_params: {
+          ...modalStepData.action_params,
+          password_locator: el.locator_value,
+          password_locator_type: el.locator_strategy,
+          password_friendly_name: el.friendly_name,
+        },
+      });
+    } else if (currentPickingTarget === "submit") {
+      setModalStepData({
+        ...modalStepData,
+        action_params: {
+          ...modalStepData.action_params,
+          submit_locator: el.locator_value,
+          submit_locator_type: el.locator_strategy,
+          submit_friendly_name: el.friendly_name,
+        },
+      });
+    } else {
+      const isNavigate = modalStepData.action_type === "navigate";
+      const isFill = modalStepData.action_type === "fill_input";
+      const isClick = modalStepData.action_type === "click_element";
+      const isSelect = modalStepData.action_type === "select_option";
+      const isVerify = modalStepData.action_type === "verify_element";
 
-  const loadData = async () => {
-    if (!projectId) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const [scList, crList, dpList] = await Promise.all([
-        getProjectScenarios(projectId),
-        getProjectCredentials(projectId),
-        getProjectDataProfiles(projectId),
-      ]);
-      setScenarios(scList);
-      setCredentials(crList);
-      setDataProfiles(dpList);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load scenarios.");
-    } finally {
-      setLoading(false);
+      let autoDesc = modalStepData.description;
+      if (!autoDesc || autoDesc.startsWith("Step") || autoDesc.includes("element") || autoDesc.includes("input") || autoDesc.includes("path")) {
+        if (isNavigate) autoDesc = `Navigate to ${el.text || el.label || el.locator_value}`;
+        else if (isFill) autoDesc = `Fill ${el.label || el.placeholder || el.friendly_name}`;
+        else if (isClick) autoDesc = `Click "${el.text || el.friendly_name}"`;
+        else if (isSelect) autoDesc = `Select option in ${el.friendly_name}`;
+        else if (isVerify) autoDesc = `Verify ${el.friendly_name}`;
+      }
+
+      const updatedParams: Record<string, any> = {
+        ...modalStepData.action_params,
+        element_friendly_name: el.friendly_name,
+        element_category: el.category,
+        available_options: el.options || [],
+      };
+
+      if (isNavigate) {
+        updatedParams.method = "click";
+        updatedParams.path = el.locator_value;
+        setNavigateMethod("menu");
+      }
+
+      setModalStepData({
+        ...modalStepData,
+        locator_value: el.locator_value,
+        locator_type: el.locator_strategy,
+        description: autoDesc,
+        action_params: updatedParams,
+      });
     }
-  };
+  }
 
+  // App switcher dropdown state
+  const [showAppSelector, setShowAppSelector] = useState(false);
+
+  // Save workflow modal state
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveWorkflowTitle, setSaveWorkflowTitle] = useState("");
+  const [saveWorkflowDesc, setSaveWorkflowDesc] = useState("");
+  const [savingWorkflow, setSavingWorkflow] = useState(false);
+
+  // Execution state
+  const [executing, setExecuting] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // Load application credentials & saved workflows
   useEffect(() => {
-    void loadData();
+    void loadAppMetadata();
   }, [projectId]);
 
-  const handleOpenCreate = () => {
-    setActiveScenarioId(null);
-    setFormName("");
-    setFormDescription("");
-    setFormTags("smoke, regression");
-    setFormPolicy("stop");
-    setFormTimeout(60);
-    setFormEnv("QA");
-    setFormCredentialId(credentials.length > 0 ? credentials[0].id : "");
-    // Default 3 starter steps
-    setFormSteps([
+  async function loadAppMetadata() {
+    setCredentialsLoading(true);
+    setStatusMessage(null);
+    try {
+      const [creds, scens] = await Promise.all([
+        getProjectCredentials(projectId).catch(() => []),
+        getProjectScenarios(projectId).catch(() => []),
+      ]);
+      setCredentials(creds);
+      setSavedWorkflows(scens);
+    } catch (err: any) {
+      console.error("Error loading app metadata:", err);
+    } finally {
+      setCredentialsLoading(false);
+    }
+  }
+
+  const effectiveBaseUrl = baseUrl || (projects.find((p) => p.id === projectId)?.base_url || "");
+  const hasVaultCredentials = credentials.length > 0;
+
+  // Add action from library
+  function handleAddAction(actionType: string) {
+    const actionDef = REUSABLE_ACTIONS.find((a) => a.type === actionType);
+    const newOrder = workflowSteps.length + 1;
+    let initialParams: Record<string, any> = {};
+    let initialDesc = actionDef ? actionDef.name : `Step ${newOrder}`;
+    let initialLocator = "";
+
+    if (actionType === "open_app") {
+      initialDesc = "Open application base URL";
+    } else if (actionType === "login") {
+      initialDesc = "Login with application vault credentials";
+    } else if (actionType === "navigate") {
+      initialParams = { method: "path", path: "/" };
+      initialDesc = "Navigate to page path";
+    } else if (actionType === "fill_input") {
+      initialParams = { value: "", clear_first: true };
+      initialDesc = "Fill input field";
+    } else if (actionType === "click_element") {
+      initialParams = { click_type: "click" };
+      initialDesc = "Click element";
+    } else if (actionType === "select_option") {
+      initialParams = { value: "" };
+      initialDesc = "Select dropdown option";
+    } else if (actionType === "verify_element") {
+      initialParams = { verify_type: "visible", expected: "" };
+      initialDesc = "Verify element visibility";
+    } else if (actionType === "wait_for_element") {
+      initialParams = { condition: "visible", timeout_ms: 5000 };
+      initialDesc = "Wait for element";
+    }
+
+    const newStep: ScenarioStep = {
+      step_order: newOrder,
+      action_type: actionType,
+      locator_type: "smart",
+      locator_value: initialLocator,
+      action_params: initialParams,
+      description: initialDesc,
+      is_enabled: true,
+    };
+
+    setEditingStepIndex(null);
+    setModalStepData(newStep);
+    setShowAdvancedLocators(false);
+    setNavigateMethod("menu");
+    setStepModalOpen(true);
+  }
+
+  function handleEditStep(index: number) {
+    const step = workflowSteps[index];
+    setEditingStepIndex(index);
+    setModalStepData(JSON.parse(JSON.stringify(step)));
+    if (step.action_type === "navigate") {
+      const isPath = step.action_params?.method === "path" || (step.locator_value && (step.locator_value.startsWith("/") || step.locator_value.startsWith("http")));
+      setNavigateMethod(isPath ? "url" : "menu");
+    }
+    setShowAdvancedLocators(
+      Boolean(step.locator_type && step.locator_type !== "smart") ||
+      Boolean(step.action_params?.username_locator || step.action_params?.password_locator)
+    );
+    setStepModalOpen(true);
+  }
+
+  function handleSaveStepModal() {
+    const type = modalStepData.action_type;
+    if (type === "navigate") {
+      const target = modalStepData.locator_value || modalStepData.action_params?.path;
+      if (!target || !target.trim()) {
+        alert("Please provide the Target Link Name or URL Route to navigate to.");
+        return;
+      }
+    } else if (type === "fill_input") {
+      if (!modalStepData.locator_value?.trim()) {
+        alert("Please provide the Target Input Field Name or Selector.");
+        return;
+      }
+      if (modalStepData.action_params?.value === undefined || modalStepData.action_params?.value === "") {
+        alert("Please provide the Value to Enter.");
+        return;
+      }
+    } else if (type === "click_element") {
+      if (!modalStepData.locator_value?.trim()) {
+        alert("Please provide the Button or Element Name to Click.");
+        return;
+      }
+    } else if (type === "select_option") {
+      if (!modalStepData.locator_value?.trim()) {
+        alert("Please provide the Dropdown Select Element.");
+        return;
+      }
+    }
+
+    const updated = [...workflowSteps];
+    if (editingStepIndex !== null) {
+      updated[editingStepIndex] = modalStepData;
+    } else {
+      updated.push({ ...modalStepData, step_order: updated.length + 1 });
+    }
+    setWorkflowSteps(updated);
+    setStepModalOpen(false);
+  }
+
+  function handleRemoveStep(index: number) {
+    const updated = workflowSteps.filter((_, i) => i !== index);
+    const reordered = updated.map((step, idx) => ({ ...step, step_order: idx + 1 }));
+    setWorkflowSteps(reordered);
+  }
+
+  function handleDuplicateStep(index: number) {
+    const step = workflowSteps[index];
+    const duplicated: ScenarioStep = {
+      ...JSON.parse(JSON.stringify(step)),
+      description: `${step.description} (Copy)`,
+    };
+    const updated = [...workflowSteps];
+    updated.splice(index + 1, 0, duplicated);
+    const reordered = updated.map((s, idx) => ({ ...s, step_order: idx + 1 }));
+    setWorkflowSteps(reordered);
+  }
+
+  function handleMoveStep(index: number, direction: "up" | "down") {
+    if (direction === "up" && index === 0) return;
+    if (direction === "down" && index === workflowSteps.length - 1) return;
+
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    const updated = [...workflowSteps];
+    const temp = updated[index];
+    updated[index] = updated[targetIndex];
+    updated[targetIndex] = temp;
+
+    const reordered = updated.map((s, idx) => ({ ...s, step_order: idx + 1 }));
+    setWorkflowSteps(reordered);
+  }
+
+  function handleToggleEnable(index: number) {
+    const updated = [...workflowSteps];
+    updated[index] = { ...updated[index], is_enabled: !updated[index].is_enabled };
+    setWorkflowSteps(updated);
+  }
+
+  function loadStandardTemplate() {
+    setWorkflowSteps([
       {
         step_order: 1,
-        action_type: "navigate",
-        locator_value: "/",
-        action_params: { url: "/" },
-        description: "Open application home page",
+        action_type: "open_app",
+        description: "Open application base URL",
+        locator_value: "",
+        action_params: {},
         is_enabled: true,
       },
       {
         step_order: 2,
-        action_type: "assert_title",
-        action_params: { value: "" },
-        description: "Verify title contains expected application name",
+        action_type: "login",
+        description: "Login with vault credentials",
+        locator_value: "",
+        action_params: {},
         is_enabled: true,
       },
       {
         step_order: 3,
-        action_type: "capture_screenshot",
-        description: "Capture screenshot of loaded page",
-        is_enabled: true,
-      },
-    ]);
-    setIsEditing(true);
-  };
-
-  const handleOpenEdit = async (scenario: ScenarioItem) => {
-    setLoading(true);
-    try {
-      const details = await getScenarioDetails(scenario.id);
-      setActiveScenarioId(details.id);
-      setFormName(details.name);
-      setFormDescription(details.description || "");
-      setFormTags((details.tags || []).join(", "));
-      setFormPolicy(details.failure_policy || "stop");
-      setFormTimeout(details.timeout_seconds || 60);
-      setFormEnv(details.environment || "QA");
-      setFormCredentialId(details.credential_id || "");
-      setFormSteps(details.steps || []);
-      setIsEditing(true);
-    } catch (err: any) {
-      setError(err?.message || "Failed to load scenario details.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAddStep = () => {
-    const nextOrder = formSteps.length + 1;
-    setFormSteps([
-      ...formSteps,
-      {
-        step_order: nextOrder,
-        action_type: "click",
-        locator_type: "css",
+        action_type: "wait_for_element",
+        description: "Wait 2 seconds for page load",
         locator_value: "",
-        action_params: {},
-        description: `Step ${nextOrder}`,
+        action_params: { condition: "duration", duration_ms: 2000 },
+        is_enabled: true,
+      },
+      {
+        step_order: 4,
+        action_type: "verify_element",
+        description: "Verify page URL or title loaded",
+        locator_value: "",
+        action_params: { verify_type: "url_contains", expected: effectiveBaseUrl.replace(/https?:\/\//, "").split("/")[0] },
         is_enabled: true,
       },
     ]);
-  };
+    setStatusMessage({ type: "success", text: "Loaded standard login & verification workflow." });
+  }
 
-  const handleInsertLoginFlow = () => {
-    const nextOrder = formSteps.length;
-    const loginSteps: ScenarioStep[] = [
-      {
-        step_order: nextOrder + 1,
-        action_type: "navigate",
-        action_params: { url: "/" },
-        description: "Open application login page",
-        is_enabled: true,
-      },
-      {
-        step_order: nextOrder + 2,
-        action_type: "fill",
-        locator_type: "css",
-        locator_value: "input[name='username'], #username, #P9999_USERNAME",
-        action_params: { value: "{{username}}" },
-        description: "Enter username from application vault",
-        is_enabled: true,
-      },
-      {
-        step_order: nextOrder + 3,
-        action_type: "fill",
-        locator_type: "css",
-        locator_value: "input[type='password'], #password, #P9999_PASSWORD",
-        action_params: { value: "{{password}}" },
-        description: "Enter password from application vault",
-        is_enabled: true,
-      },
-      {
-        step_order: nextOrder + 4,
-        action_type: "click",
-        locator_type: "css",
-        locator_value: "button[type='submit'], input[type='submit'], #B9999_LOGIN, #login-btn",
-        description: "Click Sign In / Submit button",
-        is_enabled: true,
-      },
-    ];
-    setFormSteps([...formSteps, ...loginSteps]);
-  };
-
-  const handleUpdateStep = (index: number, updates: Partial<ScenarioStep>) => {
-    const updated = [...formSteps];
-    updated[index] = { ...updated[index], ...updates };
-    setFormSteps(updated);
-  };
-
-  const handleMoveStep = (index: number, direction: "up" | "down") => {
-    if (direction === "up" && index === 0) return;
-    if (direction === "down" && index === formSteps.length - 1) return;
-
-    const targetIdx = direction === "up" ? index - 1 : index + 1;
-    const updated = [...formSteps];
-    const [moved] = updated.splice(index, 1);
-    updated.splice(targetIdx, 0, moved);
-
-    // Re-index step_order
-    updated.forEach((s, idx) => {
-      s.step_order = idx + 1;
-    });
-    setFormSteps(updated);
-  };
-
-  const handleDeleteStep = (index: number) => {
-    const updated = formSteps.filter((_, idx) => idx !== index);
-    updated.forEach((s, idx) => {
-      s.step_order = idx + 1;
-    });
-    setFormSteps(updated);
-  };
-
-  const handleSaveScenario = async () => {
-    if (!formName.trim()) {
-      setError("Scenario name is required.");
-      return;
+  function loadSavedWorkflow(scenario: ScenarioItem) {
+    if (scenario.steps && scenario.steps.length > 0) {
+      setWorkflowSteps(scenario.steps);
+      setWorkflowName(scenario.name);
+      setStatusMessage({ type: "success", text: `Loaded saved workflow: "${scenario.name}".` });
     }
-    if (formSteps.length === 0) {
-      setError("Please add at least one step to the scenario.");
+  }
+
+  // Run dynamic workflow immediately
+  async function handleRunWorkflow() {
+    if (workflowSteps.length === 0) {
+      setStatusMessage({ type: "error", text: "Workflow has no steps. Please add at least one action." });
       return;
     }
 
-    setSaving(true);
-    setError(null);
-
-    const tagsArray = formTags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean);
-
-    const payload: ScenarioPayload = {
-      name: formName.trim(),
-      description: formDescription.trim() || undefined,
-      tags: tagsArray,
-      failure_policy: formPolicy,
-      timeout_seconds: Number(formTimeout) || 60,
-      environment: formEnv,
-      credential_id: formCredentialId || null,
-      steps: formSteps,
-    };
+    setExecuting(true);
+    setStatusMessage(null);
 
     try {
-      if (activeScenarioId) {
-        await updateScenario(activeScenarioId, payload);
-        setSuccess(`Scenario "${formName}" updated successfully.`);
-      } else {
-        await createScenario(projectId, payload);
-        setSuccess(`Scenario "${formName}" created successfully.`);
-      }
-      setIsEditing(false);
-      void loadData();
-      setTimeout(() => setSuccess(null), 4000);
-    } catch (err: any) {
-      setError(err?.message || "Failed to save scenario.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteScenario = async (scenario: ScenarioItem) => {
-    if (!confirm(`Are you sure you want to delete scenario "${scenario.name}"?`)) return;
-    try {
-      await deleteScenario(scenario.id);
-      setSuccess(`Scenario "${scenario.name}" removed.`);
-      void loadData();
-      setTimeout(() => setSuccess(null), 4000);
-    } catch (err: any) {
-      setError(err?.message || "Failed to delete scenario.");
-    }
-  };
-
-  const handleTriggerRunModal = (scenario: ScenarioItem) => {
-    setExecModalScenario(scenario);
-    setExecEnv(scenario.environment || "QA");
-    setExecCredId(scenario.credential_id || (credentials[0]?.id ?? ""));
-    setExecDataProfileId(dataProfiles[0]?.id ?? "");
-  };
-
-  const handleExecuteNow = async () => {
-    if (!execModalScenario) return;
-    setExecStarting(true);
-    try {
-      const res = await runScenario(execModalScenario.id, {
-        environment: execEnv,
-        credential_id: execCredId || undefined,
-        data_profile_id: execDataProfileId || undefined,
+      const response = await runDynamicWorkflow(projectId, {
+        name: workflowName || "Dynamic Browser Workflow",
+        steps: workflowSteps,
+        failure_policy: "stop",
+        timeout_seconds: 120,
       });
-      setExecModalScenario(null);
-      onRunTriggered(res.run_id);
-    } catch (err: any) {
-      setError(err?.message || "Failed to start scenario run.");
-    } finally {
-      setExecStarting(false);
-    }
-  };
 
-  const handleCreateDataProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newProfileName.trim()) return;
-    try {
-      const parsedRows = JSON.parse(newProfileRowsJson);
-      if (!Array.isArray(parsedRows)) {
-        throw new Error("Dataset rows must be a JSON array of objects.");
+      setStatusMessage({ type: "success", text: `Workflow execution started! Run ID: ${response.run_id}` });
+      if (onRunTriggered && response.run_id) {
+        onRunTriggered(response.run_id);
       }
-      await createProjectDataProfile(projectId, {
-        name: newProfileName.trim(),
-        dataset_rows: parsedRows,
-      });
-      setNewProfileName("");
-      setNewProfileRowsJson('[\n  {"user": "tester", "role": "admin"}\n]');
-      void loadData();
-      setSuccess("Test data profile saved.");
-      setTimeout(() => setSuccess(null), 3000);
     } catch (err: any) {
-      setError(err?.message || "Invalid JSON array.");
+      setStatusMessage({
+        type: "error",
+        text: err?.message || "Failed to start workflow execution. Please verify configuration.",
+      });
+    } finally {
+      setExecuting(false);
     }
-  };
+  }
 
-  const filtered = scenarios.filter(
-    (s) =>
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      (s.description || "").toLowerCase().includes(search.toLowerCase()) ||
-      (s.tags || []).some((t) => t.toLowerCase().includes(search.toLowerCase())),
-  );
+  // Save workflow as reusable scenario
+  async function handleSaveWorkflowSubmit() {
+    if (!saveWorkflowTitle.trim()) return;
+    setSavingWorkflow(true);
+    try {
+      const created = await createScenario(projectId, {
+        name: saveWorkflowTitle.trim(),
+        description: saveWorkflowDesc.trim() || undefined,
+        tags: ["dynamic-workflow", "reusable"],
+        steps: workflowSteps,
+      });
+      setSavedWorkflows([created, ...savedWorkflows]);
+      setShowSaveModal(false);
+      setStatusMessage({ type: "success", text: `Saved workflow "${created.name}" successfully.` });
+    } catch (err: any) {
+      setStatusMessage({ type: "error", text: `Failed to save workflow: ${err.message}` });
+    } finally {
+      setSavingWorkflow(false);
+    }
+  }
 
   return (
-    <div className="scenario-builder-wrap">
-      {/* List View */}
-      {!isEditing && (
-        <div className="card">
-          <div className="card-heading-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div className="card-heading-icon" style={{ padding: 8, borderRadius: 8, background: "rgba(0, 214, 176, 0.12)", color: "#00d6b0" }}>
-                  <Layers size={22} />
-                </div>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 700, color: "var(--vq-text, #fff)" }}>
-                    Test Scenario Builder
-                  </h2>
-                  <span className="muted-text" style={{ fontSize: "0.85rem" }}>
-                    Visual, configuration-driven browser automation for <strong>{projectName}</strong>. No Python test files needed.
-                  </span>
-                </div>
-              </div>
-            </div>
+    <div className="sb-container">
+      {/* =========================================================================
+          1. COMPACT SAAS HEADER
+      ========================================================================= */}
+      <div className="sb-header">
+        <div>
+          <div className="sb-header-title-row">
+            <h1 className="sb-header-title">Workflow Studio</h1>
 
-            <div style={{ display: "flex", gap: 10 }}>
+            {/* Application Dropdown Selector */}
+            <div style={{ position: "relative" }}>
               <button
-                className="button button-secondary button-small"
-                onClick={() => setDataProfilesModalOpen(true)}
+                type="button"
+                onClick={() => setShowAppSelector(!showAppSelector)}
+                className="sb-app-selector-btn"
               >
-                <Database size={15} />
-                Data Profiles ({dataProfiles.length})
+                <span>{projectName}</span>
+                <ChevronDown size={14} style={{ color: "var(--v-text-muted)" }} />
               </button>
-              <button
-                className="button button-primary button-small"
-                onClick={handleOpenCreate}
-              >
-                <Plus size={15} />
-                Create Scenario
-              </button>
-            </div>
-          </div>
 
-          {error && (
-            <div className="alert-error" style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 8, marginBottom: 16 }}>
-              <AlertCircle size={16} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {success && (
-            <div className="alert-success" style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 8, marginBottom: 16 }}>
-              <CheckCircle2 size={16} />
-              <span>{success}</span>
-            </div>
-          )}
-
-          {/* Architecture & Credential Guidance Banner */}
-          <div
-            style={{
-              padding: "14px 18px",
-              background: "linear-gradient(135deg, #EEF2FF 0%, #F0FDF4 100%)",
-              border: "1px solid #C7D2FE",
-              borderRadius: 8,
-              marginBottom: 18,
-              display: "flex",
-              gap: 14,
-              alignItems: "flex-start",
-            }}
-          >
-            <ShieldCheck size={20} style={{ color: "var(--v-accent)", marginTop: 2, flexShrink: 0 }} />
-            <div style={{ fontSize: "0.84rem", color: "#1E293B", lineHeight: 1.5 }}>
-              <strong style={{ color: "#3730A3", display: "block", marginBottom: 3 }}>
-                How Scenario Automation & Isolated Credentials Work
-              </strong>
-              <span>
-                Scenarios run step-by-step in real headless/headed browser sessions. When your steps reference{" "}
-                <code style={{ background: "#FFFFFF", border: "1px solid #CBD5E1", padding: "1px 6px", borderRadius: 4, color: "var(--v-accent)", fontWeight: 600 }}>{"{{username}}"}</code> and{" "}
-                <code style={{ background: "#FFFFFF", border: "1px solid #CBD5E1", padding: "1px 6px", borderRadius: 4, color: "var(--v-accent)", fontWeight: 600 }}>{"{{password}}"}</code>,
-                Veriqon decrypts the credentials saved for <strong>{projectName}</strong> directly in memory. Each application has its own isolated credential vault and baseURL—credentials never leak between applications.
-              </span>
-            </div>
-          </div>
-
-          {/* Search bar */}
-          <div style={{ position: "relative", marginBottom: 16 }}>
-            <Search
-              size={16}
-              style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--vq-muted, #7188a6)" }}
-            />
-            <input
-              type="text"
-              placeholder="Search scenarios by name, description, or tags..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ width: "100%", paddingLeft: 36, height: 38 }}
-            />
-          </div>
-
-          {/* Scenario Cards / List */}
-          {loading && scenarios.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", color: "var(--vq-muted)" }}>
-              Loading scenarios...
-            </div>
-          ) : filtered.length === 0 ? (
-            <div style={{ padding: 40, textAlign: "center", background: "var(--vq-surface-2, rgba(255,255,255,0.02))", borderRadius: 8, border: "1px dashed var(--vq-border)" }}>
-              <Layers size={32} style={{ color: "var(--vq-muted)", marginBottom: 8, opacity: 0.7 }} />
-              <div style={{ fontWeight: 600, color: "var(--vq-text)" }}>No test scenarios created yet</div>
-              <div className="muted-text" style={{ fontSize: "0.85rem", marginTop: 4, marginBottom: 16 }}>
-                Create automated user journeys, form fills, button clicks, and assertions visually without writing Python test scripts.
-              </div>
-              <button className="button button-primary button-small" onClick={handleOpenCreate}>
-                <Plus size={15} /> Create Scenario
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {filtered.map((s) => (
+              {showAppSelector && (
                 <div
-                  key={s.id}
-                  className="card"
                   style={{
-                    padding: "16px 20px",
-                    background: "var(--vq-surface, #101a28)",
-                    border: "1px solid var(--vq-border)",
+                    position: "absolute",
+                    left: 0,
+                    top: "100%",
+                    zIndex: 40,
+                    marginTop: 6,
+                    width: 250,
+                    background: "var(--v-surface)",
                     borderRadius: 10,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
+                    border: "1px solid var(--v-border)",
+                    boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
+                    padding: 6,
+                    textAlign: "left",
                   }}
                 >
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontWeight: 700, fontSize: "1.05rem", color: "var(--vq-text, #fff)" }}>
-                        {s.name}
-                      </span>
-                      <span
-                        className="badge"
-                        style={{
-                          background: "rgba(0, 214, 176, 0.12)",
-                          color: "#00d6b0",
-                          padding: "2px 8px",
-                          borderRadius: 6,
-                          fontSize: "0.75rem",
-                          fontWeight: 700,
-                        }}
-                      >
-                        {s.step_count ?? s.steps?.length ?? 0} Steps
-                      </span>
-                      <span
-                        className="badge"
-                        style={{
-                          background: s.failure_policy === "stop" ? "rgba(255, 96, 120, 0.15)" : "rgba(139, 184, 255, 0.15)",
-                          color: s.failure_policy === "stop" ? "#ff6078" : "#8bb8ff",
-                          padding: "2px 8px",
-                          borderRadius: 6,
-                          fontSize: "0.75rem",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Policy: {s.failure_policy === "stop" ? "Stop on Error" : "Continue"}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: "0.85rem", color: "var(--vq-muted)" }}>
-                      {s.description || "No description provided."}
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: 14, fontSize: "0.8rem", color: "var(--vq-muted)", marginTop: 4 }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <Clock size={13} /> Timeout: {s.timeout_seconds}s
-                      </span>
-                      {s.credential_name && (
-                        <span style={{ display: "flex", alignItems: "center", gap: 4, color: "#00d6b0" }}>
-                          <ShieldCheck size={13} /> Credential: {s.credential_name}
-                        </span>
-                      )}
-                      {(s.tags || []).map((tag, tIdx) => (
-                        <span
-                          key={tIdx}
-                          style={{
-                            background: "rgba(255,255,255,0.06)",
-                            padding: "1px 6px",
-                            borderRadius: 4,
-                            fontSize: "0.75rem",
-                          }}
-                        >
-                          #{tag}
-                        </span>
-                      ))}
-                    </div>
+                  <div style={{ padding: "6px 10px", fontSize: "0.7rem", fontWeight: 700, color: "var(--v-text-muted)", textTransform: "uppercase" }}>
+                    Select Application
                   </div>
-
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <button
-                      className="button button-primary button-small"
-                      onClick={() => handleTriggerRunModal(s)}
-                    >
-                      <Play size={14} /> Run
-                    </button>
-                    <button
-                      className="button button-secondary button-small"
-                      onClick={() => void handleOpenEdit(s)}
-                      title="Edit Scenario Steps"
-                    >
-                      <Pencil size={14} /> Edit
-                    </button>
-                    <button
-                      className="button button-secondary button-small"
-                      onClick={() => void handleDeleteScenario(s)}
-                      title="Delete Scenario"
-                      style={{ color: "#ff6078" }}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Editor & Step Builder View */}
-      {isEditing && (
-        <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div className="card-heading-icon" style={{ padding: 8, borderRadius: 8, background: "rgba(0, 214, 176, 0.12)", color: "#00d6b0" }}>
-                <FileCode size={22} />
-              </div>
-              <div>
-                <h2 style={{ margin: 0, fontSize: "1.2rem", fontWeight: 700, color: "var(--vq-text, #fff)" }}>
-                  {activeScenarioId ? `Edit Scenario: ${formName}` : "Create New Automated Scenario"}
-                </h2>
-                <span className="muted-text" style={{ fontSize: "0.85rem" }}>
-                  Configure application journey, order of interaction steps, locators, and variable placeholders.
-                </span>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 10 }}>
-              <button
-                className="button button-secondary button-small"
-                onClick={() => setIsEditing(false)}
-              >
-                Back to Scenarios
-              </button>
-              <button
-                className="button button-primary button-small"
-                onClick={handleSaveScenario}
-                disabled={saving}
-              >
-                {saving ? "Saving..." : "Save Scenario"}
-              </button>
-            </div>
-          </div>
-
-          {error && (
-            <div className="alert-error" style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 8, marginBottom: 16 }}>
-              <AlertCircle size={16} />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Scenario Configuration Grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16, marginBottom: 24, padding: 16, background: "var(--vq-surface-2, rgba(255,255,255,0.02))", borderRadius: 8, border: "1px solid var(--vq-border)" }}>
-            <label className="field">
-              <span>Scenario Name *</span>
-              <input
-                type="text"
-                placeholder="e.g. Timesheet Submission Workflow"
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                required
-              />
-            </label>
-
-            <label className="field">
-              <span>Description</span>
-              <input
-                type="text"
-                placeholder="What this automated workflow verifies"
-                value={formDescription}
-                onChange={(e) => setFormDescription(e.target.value)}
-              />
-            </label>
-
-            <label className="field">
-              <span>Associated Credential Profile</span>
-              <select
-                value={formCredentialId}
-                onChange={(e) => setFormCredentialId(e.target.value)}
-              >
-                <option value="">None (Public / No Auth)</option>
-                {credentials.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} ({c.username}) - {c.environment}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field">
-              <span>Failure Policy</span>
-              <select
-                value={formPolicy}
-                onChange={(e) => setFormPolicy(e.target.value as "stop" | "continue")}
-              >
-                <option value="stop">Stop immediately on first step failure (Recommended)</option>
-                <option value="continue">Continue executing remaining steps</option>
-              </select>
-            </label>
-
-            <label className="field">
-              <span>Timeout (Seconds)</span>
-              <input
-                type="number"
-                min={5}
-                max={600}
-                value={formTimeout}
-                onChange={(e) => setFormTimeout(Number(e.target.value))}
-              />
-            </label>
-
-            <label className="field">
-              <span>Tags (comma-separated)</span>
-              <input
-                type="text"
-                placeholder="smoke, regression, timesheet"
-                value={formTags}
-                onChange={(e) => setFormTags(e.target.value)}
-              />
-            </label>
-          </div>
-
-          {/* Visual Step Builder */}
-          <div style={{ marginBottom: 24 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "1.05rem", fontWeight: 700, color: "var(--v-text)" }}>
-                  Execution Steps ({formSteps.length})
-                </h3>
-                <span style={{ fontSize: "0.82rem", color: "var(--v-text-secondary)" }}>
-                  Steps execute in exact order. Inject secure credentials with <code style={{ color: "var(--v-accent)", fontWeight: 600 }}>{"{{username}}"}</code> and <code style={{ color: "var(--v-accent)", fontWeight: 600 }}>{"{{password}}"}</code>.
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  className="button button-secondary button-small"
-                  onClick={handleInsertLoginFlow}
-                  title="Insert 4-step login sequence configured with this application's credentials"
-                >
-                  <LogIn size={14} /> Insert Login Steps
-                </button>
-                <button
-                  type="button"
-                  className="button button-primary button-small"
-                  onClick={handleAddStep}
-                >
-                  <Plus size={14} /> Add Step
-                </button>
-              </div>
-            </div>
-
-            {formSteps.length === 0 ? (
-              <div style={{ padding: 36, textAlign: "center", background: "var(--v-surface-2)", borderRadius: 8, border: "1px dashed var(--v-border)" }}>
-                <p style={{ color: "var(--v-text-secondary)", marginBottom: 14 }}>No steps defined yet. Click "Insert Login Steps" for a quick start, or "Add Step" to customize.</p>
-                <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-                  <button type="button" className="button button-secondary button-small" onClick={handleInsertLoginFlow}>
-                    <LogIn size={14} /> Insert Login Steps
-                  </button>
-                  <button type="button" className="button button-primary button-small" onClick={handleAddStep}>
-                    <Plus size={14} /> Add Step
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {formSteps.map((step, idx) => {
-                  const actionMeta = ACTION_TYPES.find((a) => a.value === step.action_type) || ACTION_TYPES[0];
-                  const hasLoc = actionMeta.hasLocator;
-                  const hasPar = actionMeta.hasParam;
-                  const paramVal = step.action_params?.value ?? step.action_params?.url ?? step.action_params?.key ?? "";
-
-                  return (
-                    <div
-                      key={idx}
-                      className="card"
-                      style={{
-                        padding: 14,
-                        background: step.is_enabled ? "var(--vq-surface, #101a28)" : "rgba(255,255,255,0.02)",
-                        border: "1px solid var(--vq-border)",
-                        borderRadius: 8,
-                        opacity: step.is_enabled ? 1 : 0.6,
-                      }}
-                    >
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span
-                            style={{
-                              background: "rgba(0, 214, 176, 0.15)",
-                              color: "#00d6b0",
-                              fontWeight: 700,
-                              borderRadius: "50%",
-                              width: 24,
-                              height: 24,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: "0.8rem",
-                            }}
-                          >
-                            {idx + 1}
-                          </span>
-                          <input
-                            type="text"
-                            placeholder="Step description..."
-                            value={step.description || ""}
-                            onChange={(e) => handleUpdateStep(idx, { description: e.target.value })}
-                            style={{
-                              fontWeight: 600,
-                              fontSize: "0.95rem",
-                              background: "transparent",
-                              border: "none",
-                              borderBottom: "1px solid transparent",
-                              color: "var(--vq-text, #fff)",
-                              width: 320,
-                            }}
-                          />
-                        </div>
-
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.8rem", cursor: "pointer", marginRight: 8 }}>
-                            <input
-                              type="checkbox"
-                              checked={step.is_enabled !== false}
-                              onChange={(e) => handleUpdateStep(idx, { is_enabled: e.target.checked })}
-                            />
-                            Enabled
-                          </label>
-
-                          <button
-                            className="button button-secondary button-small"
-                            onClick={() => handleMoveStep(idx, "up")}
-                            disabled={idx === 0}
-                            title="Move Step Up"
-                            style={{ padding: "3px 6px" }}
-                          >
-                            <ArrowUp size={13} />
-                          </button>
-                          <button
-                            className="button button-secondary button-small"
-                            onClick={() => handleMoveStep(idx, "down")}
-                            disabled={idx === formSteps.length - 1}
-                            title="Move Step Down"
-                            style={{ padding: "3px 6px" }}
-                          >
-                            <ArrowDown size={13} />
-                          </button>
-                          <button
-                            className="button button-secondary button-small"
-                            onClick={() => handleDeleteStep(idx)}
-                            title="Delete Step"
-                            style={{ padding: "3px 6px", color: "#ff6078" }}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Step Action Config Row */}
-                      <div style={{ display: "grid", gridTemplateColumns: hasLoc && hasPar ? "1.2fr 1fr 1.5fr" : hasLoc ? "1.2fr 2fr" : hasPar ? "1.2fr 2fr" : "1fr", gap: 10 }}>
-                        <label className="field" style={{ margin: 0 }}>
-                          <span style={{ fontSize: "0.78rem" }}>Action Type</span>
-                          <select
-                            value={step.action_type}
-                            onChange={(e) => {
-                              const newAction = e.target.value;
-                              handleUpdateStep(idx, {
-                                action_type: newAction,
-                                locator_type: newAction === "navigate" ? undefined : step.locator_type || "css",
-                              });
-                            }}
-                          >
-                            {ACTION_TYPES.map((a) => (
-                              <option key={a.value} value={a.value}>
-                                {a.label}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-
-                        {hasLoc && (
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <label className="field" style={{ margin: 0, width: "35%" }}>
-                              <span style={{ fontSize: "0.78rem" }}>Locator Type</span>
-                              <select
-                                value={step.locator_type || "css"}
-                                onChange={(e) => handleUpdateStep(idx, { locator_type: e.target.value })}
-                              >
-                                {LOCATOR_TYPES.map((l) => (
-                                  <option key={l.value} value={l.value}>
-                                    {l.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-
-                            <label className="field" style={{ margin: 0, flex: 1 }}>
-                              <span style={{ fontSize: "0.78rem" }}>Locator Target</span>
-                              <input
-                                type="text"
-                                placeholder="#submit-btn or text=Log In"
-                                value={step.locator_value || ""}
-                                onChange={(e) => handleUpdateStep(idx, { locator_value: e.target.value })}
-                              />
-                            </label>
-                          </div>
-                        )}
-
-                        {hasPar && (
-                          <label className="field" style={{ margin: 0 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                              <span style={{ fontSize: "0.78rem" }}>{actionMeta.paramLabel}</span>
-                              <div style={{ display: "flex", gap: 4 }}>
-                                <button
-                                  type="button"
-                                  style={{ background: "transparent", border: "none", color: "#00d6b0", fontSize: "0.7rem", cursor: "pointer", padding: 0 }}
-                                  onClick={() => {
-                                    const curr = String(paramVal || "");
-                                    const key = step.action_type === "navigate" ? "url" : step.action_type === "press_key" ? "key" : "value";
-                                    handleUpdateStep(idx, {
-                                      action_params: { ...step.action_params, [key]: curr + "{{username}}" },
-                                    });
-                                  }}
-                                >
-                                  +{"{{username}}"}
-                                </button>
-                                <button
-                                  type="button"
-                                  style={{ background: "transparent", border: "none", color: "#00d6b0", fontSize: "0.7rem", cursor: "pointer", padding: 0 }}
-                                  onClick={() => {
-                                    const curr = String(paramVal || "");
-                                    const key = step.action_type === "navigate" ? "url" : step.action_type === "press_key" ? "key" : "value";
-                                    handleUpdateStep(idx, {
-                                      action_params: { ...step.action_params, [key]: curr + "{{password}}" },
-                                    });
-                                  }}
-                                >
-                                  +{"{{password}}"}
-                                </button>
-                              </div>
-                            </div>
-                            <input
-                              type="text"
-                              placeholder={actionMeta.placeholder}
-                              value={paramVal}
-                              onChange={(e) => {
-                                const key = step.action_type === "navigate" ? "url" : step.action_type === "press_key" ? "key" : "value";
-                                handleUpdateStep(idx, {
-                                  action_params: { ...step.action_params, [key]: e.target.value },
-                                });
-                              }}
-                            />
-                          </label>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-            <button
-              className="button button-secondary"
-              onClick={() => setIsEditing(false)}
-            >
-              Cancel
-            </button>
-            <button
-              className="button button-primary"
-              onClick={handleSaveScenario}
-              disabled={saving}
-            >
-              {saving ? "Saving Workflow..." : "Save Scenario"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Execution Trigger Modal */}
-      {execModalScenario && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0, 0, 0, 0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 9999,
-            padding: 16,
-          }}
-        >
-          <div
-            className="card"
-            style={{
-              width: "100%",
-              maxWidth: 480,
-              boxShadow: "0 10px 40px rgba(0,0,0,0.6)",
-              border: "1px solid var(--vq-border)",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <PlayCircle size={20} style={{ color: "#00d6b0" }} />
-                <h3 style={{ margin: 0, fontSize: "1.1rem" }}>
-                  Run: {execModalScenario.name}
-                </h3>
-              </div>
-              <button
-                className="button button-secondary button-small"
-                onClick={() => setExecModalScenario(null)}
-                style={{ padding: 4 }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="form-stack">
-              <label className="field">
-                <span>Target Environment</span>
-                <select
-                  value={execEnv}
-                  onChange={(e) => setExecEnv(e.target.value)}
-                >
-                  <option value="QA">QA</option>
-                  <option value="Development">Development</option>
-                  <option value="Staging">Staging</option>
-                  <option value="Production">Production</option>
-                </select>
-              </label>
-
-              <label className="field">
-                <span>Application Credential</span>
-                <select
-                  value={execCredId}
-                  onChange={(e) => setExecCredId(e.target.value)}
-                >
-                  <option value="">No credential override</option>
-                  {credentials.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.username}) [{c.environment}]
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              {dataProfiles.length > 0 && (
-                <label className="field">
-                  <span>Test Data Profile (Optional)</span>
-                  <select
-                    value={execDataProfileId}
-                    onChange={(e) => setExecDataProfileId(e.target.value)}
-                  >
-                    <option value="">None (Static Step Values)</option>
-                    {dataProfiles.map((dp) => (
-                      <option key={dp.id} value={dp.id}>
-                        {dp.name} ({dp.dataset_rows.length} rows)
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 14 }}>
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={() => setExecModalScenario(null)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="button button-primary"
-                  onClick={handleExecuteNow}
-                  disabled={execStarting}
-                >
-                  <Play size={15} />
-                  {execStarting ? "Launching Runner..." : "Start Scenario"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Data Profiles Modal */}
-      {dataProfilesModalOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0, 0, 0, 0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 9999,
-            padding: 16,
-          }}
-        >
-          <div
-            className="card"
-            style={{
-              width: "100%",
-              maxWidth: 600,
-              boxShadow: "0 10px 40px rgba(0,0,0,0.6)",
-              border: "1px solid var(--vq-border)",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Database size={20} style={{ color: "#00d6b0" }} />
-                <h3 style={{ margin: 0, fontSize: "1.1rem" }}>
-                  Reusable Test Data Profiles
-                </h3>
-              </div>
-              <button
-                className="button button-secondary button-small"
-                onClick={() => setDataProfilesModalOpen(false)}
-                style={{ padding: 4 }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div style={{ marginBottom: 16, maxHeight: 180, overflowY: "auto" }}>
-              {dataProfiles.length === 0 ? (
-                <p className="muted-text" style={{ fontSize: "0.85rem" }}>
-                  No data profiles configured for this application yet.
-                </p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {dataProfiles.map((dp) => (
-                    <div
-                      key={dp.id}
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 6,
-                        background: "var(--vq-surface-2)",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                      }}
-                    >
-                      <div>
-                        <strong>{dp.name}</strong> ({dp.dataset_rows.length} rows)
-                      </div>
+                  <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                    {projects.map((p) => (
                       <button
-                        className="button button-secondary button-small"
-                        onClick={async () => {
-                          await deleteProjectDataProfile(dp.id);
-                          void loadData();
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          if (onSelectProject) onSelectProject(p.id);
+                          setShowAppSelector(false);
                         }}
-                        style={{ color: "#ff6078", padding: "2px 6px" }}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "8px 10px",
+                          borderRadius: 6,
+                          fontSize: "0.8rem",
+                          border: "none",
+                          cursor: "pointer",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          background: p.id === projectId ? "var(--v-accent-light)" : "transparent",
+                          color: p.id === projectId ? "var(--v-accent)" : "var(--v-text)",
+                          fontWeight: p.id === projectId ? 700 : 500,
+                        }}
                       >
-                        <Trash2 size={13} />
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                        {p.id === projectId && <Check size={14} />}
+                      </button>
+                    ))}
+                  </div>
+                  {onNavigateToApplications && (
+                    <div style={{ borderTop: "1px solid var(--v-border)", marginTop: 6, paddingTop: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAppSelector(false);
+                          onNavigateToApplications();
+                        }}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          padding: "6px 10px",
+                          borderRadius: 6,
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          color: "var(--v-accent)",
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Manage Applications &rarr;
                       </button>
                     </div>
-                  ))}
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          <p className="sb-header-subtitle">
+            Build and run browser workflows using reusable actions.
+          </p>
+        </div>
+
+        {/* Right Aligned Header Actions */}
+        <div className="sb-header-actions">
+          <button
+            type="button"
+            onClick={loadStandardTemplate}
+            className="button button-secondary button-small"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <Sparkles size={14} style={{ color: "var(--v-accent)" }} />
+            <span>Standard Flow</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void loadAppMetadata()}
+            disabled={credentialsLoading}
+            title="Refresh application configuration"
+            className="button button-secondary button-small"
+            style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "6px 10px" }}
+          >
+            <RefreshCw size={14} className={credentialsLoading ? "spin" : ""} />
+          </button>
+
+          {running ? (
+            <button
+              type="button"
+              onClick={onStopRun}
+              className="button button-danger button-small"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "7px 16px",
+                background: "#dc2626",
+                borderColor: "#b91c1c",
+                color: "#ffffff",
+                fontWeight: 600,
+              }}
+            >
+              <Square size={14} fill="currentColor" />
+              <span>Stop Run</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void handleRunWorkflow()}
+              disabled={executing || workflowSteps.length === 0}
+              className="button button-primary button-small"
+              style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "7px 16px" }}
+            >
+              {executing ? (
+                <>
+                  <div className="vq-spinner-sm" />
+                  <span>Starting...</span>
+                </>
+              ) : (
+                <>
+                  <Play size={14} fill="currentColor" />
+                  <span>Run Workflow</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Operational Alert if Credentials are Missing */}
+      {!hasVaultCredentials && !credentialsLoading && (
+        <div className="alert alert-error" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <AlertCircle size={18} />
+            <span>
+              No credentials configured in vault for <strong>{projectName}</strong>. The <em>Login</em> action requires credentials in the vault.
+            </span>
+          </div>
+          {onNavigateToCredentials && (
+            <button
+              onClick={onNavigateToCredentials}
+              style={{
+                background: "transparent",
+                border: "none",
+                fontWeight: 700,
+                color: "inherit",
+                cursor: "pointer",
+                textDecoration: "underline",
+              }}
+            >
+              Configure Credentials &rarr;
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Status Notification */}
+      {statusMessage && (
+        <div
+          className={`alert ${statusMessage.type === "success" ? "alert-success" : "alert-error"}`}
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: 0 }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {statusMessage.type === "success" ? <Check size={18} /> : <AlertCircle size={18} />}
+            <span>{statusMessage.text}</span>
+          </div>
+          <button
+            onClick={() => setStatusMessage(null)}
+            style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit" }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* =========================================================================
+          2. AVAILABLE ACTIONS (Responsive 4-column Grid)
+      ========================================================================= */}
+      <div className="sb-section">
+        <div className="sb-section-header">
+          <div>
+            <h2 className="sb-section-title">Available actions</h2>
+            <p className="sb-section-desc">Add the steps you want Veriqon to perform.</p>
+          </div>
+        </div>
+
+        <div className="sb-actions-grid">
+          {REUSABLE_ACTIONS.map((action) => {
+            const Icon = action.icon;
+            return (
+              <div
+                key={action.type}
+                onClick={() => handleAddAction(action.type)}
+                className="sb-action-card"
+              >
+                <div>
+                  <div className="sb-action-card-top">
+                    <div className="sb-action-icon-box">
+                      <Icon size={18} />
+                    </div>
+                    <span className="sb-action-add-btn">+ Add</span>
+                  </div>
+                  <h3 className="sb-action-name">{action.name}</h3>
+                  <p className="sb-action-desc">{action.shortDesc}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* =========================================================================
+          3. YOUR WORKFLOW (Numbered Sequential Steps)
+      ========================================================================= */}
+      <div className="sb-section">
+        <div className="sb-section-header">
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h2 className="sb-section-title">Your workflow</h2>
+              <span className="badge" style={{ fontSize: "0.72rem", padding: "2px 8px" }}>
+                {workflowSteps.length} {workflowSteps.length === 1 ? "step" : "steps"}
+              </span>
+            </div>
+            <p className="sb-section-desc">Steps will execute sequentially from top to bottom.</p>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setShowSaveModal(true)}
+              disabled={workflowSteps.length === 0}
+              className="button button-secondary button-small"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <Bookmark size={13} style={{ color: "var(--v-text-muted)" }} />
+              <span>Save as Workflow</span>
+            </button>
+            {workflowSteps.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setWorkflowSteps([])}
+                className="button button-secondary button-small"
+                style={{ padding: "6px 8px" }}
+                title="Clear all steps"
+              >
+                <Trash2 size={14} style={{ color: "var(--v-error)" }} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Empty State */}
+        {workflowSteps.length === 0 ? (
+          <div className="sb-empty-card">
+            <div
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 10,
+                background: "var(--v-surface-2)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "var(--v-text-muted)",
+                marginBottom: 12,
+              }}
+            >
+              <Layers size={22} />
+            </div>
+            <h3 style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: "var(--v-text)" }}>
+              Your workflow has no steps yet
+            </h3>
+            <p style={{ margin: "4px 0 16px 0", fontSize: "0.8rem", color: "var(--v-text-secondary)", maxWidth: 360 }}>
+              Select any action from the library above to add a step, or load the standard starter sequence.
+            </p>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={loadStandardTemplate}
+                className="button button-primary button-small"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <Sparkles size={14} />
+                <span>Load Standard Flow</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddAction("open_app")}
+                className="button button-secondary button-small"
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <Plus size={14} />
+                <span>Add First Action</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="sb-workflow-list">
+            {workflowSteps.map((step, idx) => {
+              const actionDef = REUSABLE_ACTIONS.find((a) => a.type === step.action_type) || {
+                name: step.action_type,
+                shortDesc: "",
+                icon: FileCode,
+              };
+              const Icon = actionDef.icon;
+              const isFirst = idx === 0;
+              const isLast = idx === workflowSteps.length - 1;
+
+              return (
+                <div
+                  key={idx}
+                  className={`sb-step-card ${!step.is_enabled ? "disabled" : ""}`}
+                >
+                  {/* Left: Step Number, Icon, Title, and Concise Summary */}
+                  <div className="sb-step-left">
+                    <span className="sb-step-num">{idx + 1}</span>
+
+                    <div className="sb-step-icon">
+                      <Icon size={16} />
+                    </div>
+
+                    <div className="sb-step-content">
+                      <div className="sb-step-title-row">
+                        <span className="sb-step-title">
+                          {step.description || actionDef.name}
+                        </span>
+                        <span className="sb-step-tag">
+                          {step.action_type}
+                        </span>
+                      </div>
+
+                      {/* Concise Config Summary */}
+                      <div className="sb-step-summary">
+                        {step.action_type === "open_app" && (
+                          <span>
+                            Opens application base URL {step.action_params?.path ? `(${step.action_params.path})` : ""}
+                          </span>
+                        )}
+                        {step.action_type === "login" && (
+                          <span style={{ color: "var(--v-success-text)", fontWeight: 600 }}>
+                            Auto-authenticates with saved vault credentials
+                          </span>
+                        )}
+                        {step.action_type === "navigate" && (
+                          <span>Destination: {step.action_params?.path || step.locator_value || "/"}</span>
+                        )}
+                        {step.action_type === "fill_input" && (
+                          <span>
+                            Field: <strong style={{ color: "var(--v-text)" }}>{step.locator_value || "unspecified"}</strong> &bull; Value: "{step.action_params?.value || ""}"
+                          </span>
+                        )}
+                        {step.action_type === "click_element" && (
+                          <span>
+                            Target: <strong style={{ color: "var(--v-text)" }}>{step.locator_value || "unspecified"}</strong>
+                          </span>
+                        )}
+                        {step.action_type === "select_option" && (
+                          <span>
+                            Dropdown: {step.locator_value} &bull; Option: "{step.action_params?.value || ""}"
+                          </span>
+                        )}
+                        {step.action_type === "verify_element" && (
+                          <span>
+                            Verify: <strong style={{ color: "var(--v-text)" }}>{step.action_params?.verify_type || "visible"}</strong>
+                            {step.action_params?.expected && ` "${step.action_params.expected}"`}
+                          </span>
+                        )}
+                        {step.action_type === "wait_for_element" && (
+                          <span>
+                            Condition: {step.action_params?.condition === "duration" ? `${step.action_params?.duration_ms || 1000}ms` : step.action_params?.condition || "visible"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: Step Controls (Consistent Alignment) */}
+                  <div className="sb-step-controls">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleEnable(idx)}
+                      title={step.is_enabled ? "Disable step" : "Enable step"}
+                      className="sb-icon-btn"
+                    >
+                      {step.is_enabled ? <Eye size={15} /> : <EyeOff size={15} style={{ color: "var(--v-warning)" }} />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMoveStep(idx, "up")}
+                      disabled={isFirst}
+                      title="Move up"
+                      className="sb-icon-btn"
+                    >
+                      <ArrowUp size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleMoveStep(idx, "down")}
+                      disabled={isLast}
+                      title="Move down"
+                      className="sb-icon-btn"
+                    >
+                      <ArrowDown size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDuplicateStep(idx)}
+                      title="Duplicate step"
+                      className="sb-icon-btn"
+                    >
+                      <Copy size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleEditStep(idx)}
+                      title="Edit step"
+                      className="sb-icon-btn"
+                      style={{ color: "var(--v-accent)" }}
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveStep(idx)}
+                      title="Delete step"
+                      className="sb-icon-btn danger"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Saved Workflows Accordion/Selector if Any Exist */}
+        {savedWorkflows.length > 0 && (
+          <div style={{ paddingTop: 14, borderTop: "1px solid var(--v-border)" }}>
+            <details style={{ background: "var(--v-surface)", border: "1px solid var(--v-border)", borderRadius: 10, padding: 12 }}>
+              <summary style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <Bookmark size={14} style={{ color: "var(--v-accent)" }} />
+                  Saved Reusable Workflows ({savedWorkflows.length})
+                </span>
+                <ChevronDown size={14} style={{ color: "var(--v-text-muted)" }} />
+              </summary>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10, marginTop: 12 }}>
+                {savedWorkflows.map((scen) => (
+                  <div
+                    key={scen.id}
+                    onClick={() => loadSavedWorkflow(scen)}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid var(--v-border)",
+                      background: "var(--v-surface)",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--v-text)" }}>{scen.name}</div>
+                      <div style={{ fontSize: "0.7rem", color: "var(--v-text-muted)" }}>{scen.steps?.length || 0} steps</div>
+                    </div>
+                    <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--v-accent)" }}>Load &rarr;</span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        )}
+      </div>
+
+      {/* =========================================================================
+          4. ACTION CONFIGURATION MODAL (Only asks necessary questions)
+      ========================================================================= */}
+      {stepModalOpen && (
+        <div className="sb-modal-backdrop">
+          <div className="sb-modal-card">
+            {/* Modal Header */}
+            <div className="sb-modal-header">
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 8,
+                    background: "var(--v-accent-light)",
+                    color: "var(--v-accent)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
+                >
+                  {React.createElement(
+                    REUSABLE_ACTIONS.find((a) => a.type === modalStepData.action_type)?.icon || FileCode,
+                    { size: 18 }
+                  )}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: "0.95rem", fontWeight: 700, color: "var(--v-text)" }}>
+                    {editingStepIndex !== null ? "Edit Action" : "Add Action"}:{" "}
+                    {REUSABLE_ACTIONS.find((a) => a.type === modalStepData.action_type)?.name ||
+                      modalStepData.action_type}
+                  </h3>
+                  <p style={{ margin: "2px 0 0 0", fontSize: "0.75rem", color: "var(--v-text-secondary)" }}>
+                    {REUSABLE_ACTIONS.find((a) => a.type === modalStepData.action_type)?.shortDesc}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStepModalOpen(false)}
+                className="sb-icon-btn"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Modal Body: Action-Specific Form Fields */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: "60vh", overflowY: "auto", paddingRight: 4 }}>
+              {/* Step Description */}
+              <div>
+                <label className="sb-label">Step Description</label>
+                <input
+                  type="text"
+                  value={modalStepData.description || ""}
+                  onChange={(e) => setModalStepData({ ...modalStepData, description: e.target.value })}
+                  placeholder="e.g. Enter timesheet hours and save"
+                  className="sb-input"
+                />
+              </div>
+
+              {/* ACTION 1: Open Application */}
+              {modalStepData.action_type === "open_app" && (
+                <div style={{ background: "var(--v-surface-2)", borderRadius: 10, padding: 14, border: "1px solid var(--v-border)", display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div>
+                      <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                        Target Application
+                      </div>
+                      <div style={{ fontSize: "0.76rem", color: "var(--v-text-secondary)", marginTop: 2 }}>
+                        {projectName} ({effectiveBaseUrl || "No URL configured"})
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="sb-picker-btn"
+                      onClick={() => {
+                        setCurrentPickingTarget("main");
+                        setElementPickerOpen(true);
+                      }}
+                      title="Open interactive page inspector"
+                    >
+                      <Sparkles size={14} />
+                      Inspect Page
+                    </button>
+                  </div>
+
+                  <div>
+                    <label className="sb-label">Relative Path Override (Optional)</label>
+                    <input
+                      type="text"
+                      value={modalStepData.action_params?.path || ""}
+                      onChange={(e) =>
+                        setModalStepData({
+                          ...modalStepData,
+                          action_params: { ...modalStepData.action_params, path: e.target.value },
+                        })
+                      }
+                      placeholder="/dashboard or /login (leave empty for base URL)"
+                      className="sb-input"
+                      style={{ fontFamily: "monospace" }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* ACTION 2: Login */}
+              {modalStepData.action_type === "login" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ background: "var(--v-success-bg)", border: "1px solid var(--v-success-border)", borderRadius: 10, padding: 12, fontSize: "0.8rem", color: "var(--v-success-text)", lineHeight: 1.4 }}>
+                    Veriqon automatically retrieves and injects the credentials saved in the vault for{" "}
+                    <strong>{projectName}</strong>. Passwords remain encrypted and are never exposed.
+                  </div>
+
+                  {/* Form Field Target Locators with pickers */}
+                  <div style={{ background: "var(--v-surface-2)", borderRadius: 10, padding: 12, border: "1px solid var(--v-border)", display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--v-text)" }}>
+                      Login Form Elements (Auto-detected or Pick from Page)
+                    </div>
+
+                    {/* Username Field */}
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                        <label className="sb-label" style={{ margin: 0 }}>Username Field</label>
+                        <button
+                          type="button"
+                          className="sb-picker-btn-mini"
+                          onClick={() => {
+                            setCurrentPickingTarget("username");
+                            setElementPickerOpen(true);
+                          }}
+                        >
+                          <MousePointer size={12} />
+                          {modalStepData.action_params?.username_locator ? "Re-pick" : "Inspect & Pick"}
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={modalStepData.action_params?.username_locator || ""}
+                        onChange={(e) =>
+                          setModalStepData({
+                            ...modalStepData,
+                            action_params: { ...modalStepData.action_params, username_locator: e.target.value },
+                          })
+                        }
+                        placeholder="Auto-detected (e.g. textbox:Username, #username)"
+                        className="sb-input"
+                        style={{ fontFamily: "monospace" }}
+                      />
+                    </div>
+
+                    {/* Password Field */}
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                        <label className="sb-label" style={{ margin: 0 }}>Password Field</label>
+                        <button
+                          type="button"
+                          className="sb-picker-btn-mini"
+                          onClick={() => {
+                            setCurrentPickingTarget("password");
+                            setElementPickerOpen(true);
+                          }}
+                        >
+                          <MousePointer size={12} />
+                          {modalStepData.action_params?.password_locator ? "Re-pick" : "Inspect & Pick"}
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={modalStepData.action_params?.password_locator || ""}
+                        onChange={(e) =>
+                          setModalStepData({
+                            ...modalStepData,
+                            action_params: { ...modalStepData.action_params, password_locator: e.target.value },
+                          })
+                        }
+                        placeholder="Auto-detected (e.g. textbox:Password, #password)"
+                        className="sb-input"
+                        style={{ fontFamily: "monospace" }}
+                      />
+                    </div>
+
+                    {/* Submit Button */}
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                        <label className="sb-label" style={{ margin: 0 }}>Submit Button</label>
+                        <button
+                          type="button"
+                          className="sb-picker-btn-mini"
+                          onClick={() => {
+                            setCurrentPickingTarget("submit");
+                            setElementPickerOpen(true);
+                          }}
+                        >
+                          <MousePointer size={12} />
+                          {modalStepData.action_params?.submit_locator ? "Re-pick" : "Inspect & Pick"}
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={modalStepData.action_params?.submit_locator || ""}
+                        onChange={(e) =>
+                          setModalStepData({
+                            ...modalStepData,
+                            action_params: { ...modalStepData.action_params, submit_locator: e.target.value },
+                          })
+                        }
+                        placeholder="Auto-detected (e.g. button:Sign In, button[type=submit])"
+                        className="sb-input"
+                        style={{ fontFamily: "monospace" }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ACTION 3: Navigate */}
+              {modalStepData.action_type === "navigate" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div className="sb-nav-tabs">
+                    <button
+                      type="button"
+                      className={`sb-nav-tab ${navigateMethod === "menu" ? "sb-nav-tab-active" : ""}`}
+                      onClick={() => {
+                        setNavigateMethod("menu");
+                        setModalStepData({
+                          ...modalStepData,
+                          action_params: { ...modalStepData.action_params, method: "click" },
+                        });
+                      }}
+                    >
+                      <Compass size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                      Select Link or Menu Item
+                    </button>
+                    <button
+                      type="button"
+                      className={`sb-nav-tab ${navigateMethod === "url" ? "sb-nav-tab-active" : ""}`}
+                      onClick={() => {
+                        setNavigateMethod("url");
+                        setModalStepData({
+                          ...modalStepData,
+                          action_params: { ...modalStepData.action_params, method: "path" },
+                        });
+                      }}
+                    >
+                      <Globe size={14} style={{ display: "inline", marginRight: 6, verticalAlign: "middle" }} />
+                      Direct URL Route
+                    </button>
+                  </div>
+
+                  {navigateMethod === "menu" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {modalStepData.locator_value ? (
+                        <div className="sb-picked-card">
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div
+                              style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 6,
+                                background: "rgba(16, 185, 129, 0.15)",
+                                color: "var(--v-success)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                            >
+                              <Check size={16} />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                                {modalStepData.action_params?.element_friendly_name || modalStepData.locator_value}
+                              </div>
+                              <div style={{ fontSize: "0.72rem", color: "var(--v-text-secondary)", fontFamily: "monospace" }}>
+                                {modalStepData.locator_type || "smart"}: {modalStepData.locator_value}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="sb-picker-btn-mini"
+                            onClick={() => {
+                              setCurrentPickingTarget("main");
+                              setElementPickerOpen(true);
+                            }}
+                          >
+                            Pick Different Menu
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="sb-picker-btn"
+                          style={{ justifyContent: "center", padding: "10px 16px" }}
+                          onClick={() => {
+                            setCurrentPickingTarget("main");
+                            setElementPickerOpen(true);
+                          }}
+                        >
+                          <Sparkles size={16} />
+                          Inspect & Pick Menu / Link from Page
+                        </button>
+                      )}
+
+                      <div>
+                        <label className="sb-label">Visible Menu or Link Name <b>*</b></label>
+                        <input
+                          type="text"
+                          required
+                          value={modalStepData.locator_value || ""}
+                          onChange={(e) =>
+                            setModalStepData({
+                              ...modalStepData,
+                              locator_value: e.target.value,
+                              action_params: { ...modalStepData.action_params, method: "click", path: e.target.value },
+                            })
+                          }
+                          placeholder='e.g. "My Timesheet", "Dashboard", "Projects"'
+                          className="sb-input"
+                        />
+                        <small style={{ display: "block", marginTop: 4, fontSize: "0.74rem", color: "var(--v-text-secondary)" }}>
+                          Enter the visible text of the menu or link to click.
+                        </small>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="sb-label">URL Path or Full URL <b>*</b></label>
+                      <input
+                        type="text"
+                        required
+                        value={modalStepData.action_params?.path || modalStepData.locator_value || ""}
+                        onChange={(e) =>
+                          setModalStepData({
+                            ...modalStepData,
+                            locator_value: e.target.value,
+                            action_params: { ...modalStepData.action_params, method: "path", path: e.target.value },
+                          })
+                        }
+                        placeholder="e.g. /dashboard, /timesheet, or https://example.com/page"
+                        className="sb-input"
+                        style={{ fontFamily: "monospace" }}
+                      />
+                      <small style={{ display: "block", marginTop: 4, fontSize: "0.74rem", color: "var(--v-text-secondary)" }}>
+                        Relative routes will navigate relative to the application's base URL.
+                      </small>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ACTION 4: Fill Input */}
+              {modalStepData.action_type === "fill_input" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {modalStepData.locator_value ? (
+                    <div className="sb-picked-card">
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 6,
+                            background: "rgba(16, 185, 129, 0.15)",
+                            color: "var(--v-success)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Check size={16} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                            {modalStepData.action_params?.element_friendly_name || modalStepData.locator_value}
+                          </div>
+                          <div style={{ fontSize: "0.72rem", color: "var(--v-text-secondary)", fontFamily: "monospace" }}>
+                            {modalStepData.locator_type || "smart"}: {modalStepData.locator_value}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="sb-picker-btn-mini"
+                        onClick={() => {
+                          setCurrentPickingTarget("main");
+                          setElementPickerOpen(true);
+                        }}
+                      >
+                        Pick Different Field
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="sb-picker-btn"
+                      style={{ justifyContent: "center", padding: "10px 16px" }}
+                      onClick={() => {
+                        setCurrentPickingTarget("main");
+                        setElementPickerOpen(true);
+                      }}
+                    >
+                      <Sparkles size={16} />
+                      Inspect & Pick Input Field from Page
+                    </button>
+                  )}
+
+                  <div>
+                    <label className="sb-label">Target Field Name or Selector <b>*</b></label>
+                    <input
+                      type="text"
+                      required
+                      value={modalStepData.locator_value || ""}
+                      onChange={(e) => setModalStepData({ ...modalStepData, locator_value: e.target.value })}
+                      placeholder='e.g. "Hours Worked", "Task Name", "Email"'
+                      className="sb-input"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="sb-label">Value to Enter <b>*</b></label>
+                    <input
+                      type="text"
+                      required
+                      value={modalStepData.action_params?.value ?? ""}
+                      onChange={(e) =>
+                        setModalStepData({
+                          ...modalStepData,
+                          action_params: { ...modalStepData.action_params, value: e.target.value },
+                        })
+                      }
+                      placeholder='e.g. "8.0", "Development", or "2026-10-23"'
+                      className="sb-input"
+                    />
+                  </div>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      id="clear_first"
+                      checked={modalStepData.action_params?.clear_first !== false}
+                      onChange={(e) =>
+                        setModalStepData({
+                          ...modalStepData,
+                          action_params: { ...modalStepData.action_params, clear_first: e.target.checked },
+                        })
+                      }
+                    />
+                    <label htmlFor="clear_first" style={{ fontSize: "0.78rem", color: "var(--v-text-secondary)", cursor: "pointer" }}>
+                      Clear existing field value before typing
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* ACTION 5: Click Element */}
+              {modalStepData.action_type === "click_element" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {modalStepData.locator_value ? (
+                    <div className="sb-picked-card">
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 6,
+                            background: "rgba(16, 185, 129, 0.15)",
+                            color: "var(--v-success)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Check size={16} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                            {modalStepData.action_params?.element_friendly_name || modalStepData.locator_value}
+                          </div>
+                          <div style={{ fontSize: "0.72rem", color: "var(--v-text-secondary)", fontFamily: "monospace" }}>
+                            {modalStepData.locator_type || "smart"}: {modalStepData.locator_value}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="sb-picker-btn-mini"
+                        onClick={() => {
+                          setCurrentPickingTarget("main");
+                          setElementPickerOpen(true);
+                        }}
+                      >
+                        Pick Different Button
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="sb-picker-btn"
+                      style={{ justifyContent: "center", padding: "10px 16px" }}
+                      onClick={() => {
+                        setCurrentPickingTarget("main");
+                        setElementPickerOpen(true);
+                      }}
+                    >
+                      <Sparkles size={16} />
+                      Inspect & Pick Button from Page
+                    </button>
+                  )}
+
+                  <div>
+                    <label className="sb-label">Button or Element Name <b>*</b></label>
+                    <input
+                      type="text"
+                      required
+                      value={modalStepData.locator_value || ""}
+                      onChange={(e) => setModalStepData({ ...modalStepData, locator_value: e.target.value })}
+                      placeholder='e.g. "Save", "Submit", "Sign In", "Apply"'
+                      className="sb-input"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="sb-label">Click Type</label>
+                    <select
+                      value={modalStepData.action_params?.click_type || "click"}
+                      onChange={(e) =>
+                        setModalStepData({
+                          ...modalStepData,
+                          action_params: { ...modalStepData.action_params, click_type: e.target.value },
+                        })
+                      }
+                      className="sb-input"
+                    >
+                      <option value="click">Single Click</option>
+                      <option value="double">Double Click</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* ACTION 6: Select Option */}
+              {modalStepData.action_type === "select_option" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {modalStepData.locator_value ? (
+                    <div className="sb-picked-card">
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div
+                          style={{
+                            width: 32,
+                            height: 32,
+                            borderRadius: 6,
+                            background: "rgba(16, 185, 129, 0.15)",
+                            color: "var(--v-success)",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
+                        >
+                          <Check size={16} />
+                        </div>
+                        <div>
+                          <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                            {modalStepData.action_params?.element_friendly_name || modalStepData.locator_value}
+                          </div>
+                          <div style={{ fontSize: "0.72rem", color: "var(--v-text-secondary)", fontFamily: "monospace" }}>
+                            {modalStepData.locator_type || "smart"}: {modalStepData.locator_value}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="sb-picker-btn-mini"
+                        onClick={() => {
+                          setCurrentPickingTarget("main");
+                          setElementPickerOpen(true);
+                        }}
+                      >
+                        Pick Different Dropdown
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="sb-picker-btn"
+                      style={{ justifyContent: "center", padding: "10px 16px" }}
+                      onClick={() => {
+                        setCurrentPickingTarget("main");
+                        setElementPickerOpen(true);
+                      }}
+                    >
+                      <Sparkles size={16} />
+                      Inspect & Pick Dropdown from Page
+                    </button>
+                  )}
+
+                  <div>
+                    <label className="sb-label">Dropdown Field Name or Selector <b>*</b></label>
+                    <input
+                      type="text"
+                      required
+                      value={modalStepData.locator_value || ""}
+                      onChange={(e) => setModalStepData({ ...modalStepData, locator_value: e.target.value })}
+                      placeholder='e.g. "Department", "Status", or "select#project"'
+                      className="sb-input"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="sb-label">Option to Select <b>*</b></label>
+                    {modalStepData.action_params?.available_options && modalStepData.action_params.available_options.length > 0 ? (
+                      <select
+                        value={modalStepData.action_params?.value || ""}
+                        onChange={(e) =>
+                          setModalStepData({
+                            ...modalStepData,
+                            action_params: { ...modalStepData.action_params, value: e.target.value },
+                          })
+                        }
+                        className="sb-input"
+                      >
+                        <option value="">-- Choose Option from Inspected Dropdown --</option>
+                        {modalStepData.action_params.available_options.map((opt: any, idx: number) => {
+                          const val = typeof opt === "object" ? opt.value || opt.label : opt;
+                          const lab = typeof opt === "object" ? opt.label || opt.value : opt;
+                          return (
+                            <option key={idx} value={val}>
+                              {lab}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        required
+                        value={modalStepData.action_params?.value || modalStepData.action_params?.label || ""}
+                        onChange={(e) =>
+                          setModalStepData({
+                            ...modalStepData,
+                            action_params: { ...modalStepData.action_params, value: e.target.value },
+                          })
+                        }
+                        placeholder='e.g. "Approved", "Engineering", or "101"'
+                        className="sb-input"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ACTION 7: Verify Element */}
+              {modalStepData.action_type === "verify_element" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div>
+                    <label className="sb-label">Verification Assertion Type</label>
+                    <select
+                      value={modalStepData.action_params?.verify_type || "visible"}
+                      onChange={(e) =>
+                        setModalStepData({
+                          ...modalStepData,
+                          action_params: { ...modalStepData.action_params, verify_type: e.target.value },
+                        })
+                      }
+                      className="sb-input"
+                    >
+                      <option value="visible">Verify Element is Visible</option>
+                      <option value="hidden">Verify Element is Hidden</option>
+                      <option value="contains_text">Verify Element Contains Text</option>
+                      <option value="exact_text">Verify Element Exact Text</option>
+                      <option value="input_value">Verify Field Input Value</option>
+                      <option value="url_contains">Verify Page URL Contains Substring</option>
+                      <option value="page_title">Verify Page Title Contains Substring</option>
+                    </select>
+                  </div>
+
+                  {modalStepData.action_params?.verify_type !== "url_contains" &&
+                    modalStepData.action_params?.verify_type !== "page_title" && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {modalStepData.locator_value ? (
+                          <div className="sb-picked-card">
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <div
+                                style={{
+                                  width: 32,
+                                  height: 32,
+                                  borderRadius: 6,
+                                  background: "rgba(16, 185, 129, 0.15)",
+                                  color: "var(--v-success)",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                }}
+                              >
+                                <Check size={16} />
+                              </div>
+                              <div>
+                                <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                                  {modalStepData.action_params?.element_friendly_name || modalStepData.locator_value}
+                                </div>
+                                <div style={{ fontSize: "0.72rem", color: "var(--v-text-secondary)", fontFamily: "monospace" }}>
+                                  {modalStepData.locator_type || "smart"}: {modalStepData.locator_value}
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              className="sb-picker-btn-mini"
+                              onClick={() => {
+                                setCurrentPickingTarget("main");
+                                setElementPickerOpen(true);
+                              }}
+                            >
+                              Pick Different Element
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="sb-picker-btn"
+                            style={{ justifyContent: "center", padding: "10px 16px" }}
+                            onClick={() => {
+                              setCurrentPickingTarget("main");
+                              setElementPickerOpen(true);
+                            }}
+                          >
+                            <Sparkles size={16} />
+                            Inspect & Pick Target Element from Page
+                          </button>
+                        )}
+
+                        <div>
+                          <label className="sb-label">Target Element Locator <b>*</b></label>
+                          <input
+                            type="text"
+                            value={modalStepData.locator_value || ""}
+                            onChange={(e) => setModalStepData({ ...modalStepData, locator_value: e.target.value })}
+                            placeholder='e.g. "Success Message", ".alert-success", or "#status-badge"'
+                            className="sb-input"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                  {modalStepData.action_params?.verify_type !== "visible" &&
+                    modalStepData.action_params?.verify_type !== "hidden" && (
+                      <div>
+                        <label className="sb-label">Expected Value / Text <b>*</b></label>
+                        <input
+                          type="text"
+                          required
+                          value={modalStepData.action_params?.expected || ""}
+                          onChange={(e) =>
+                            setModalStepData({
+                              ...modalStepData,
+                              action_params: { ...modalStepData.action_params, expected: e.target.value },
+                            })
+                          }
+                          placeholder='e.g. "Saved successfully", "Dashboard", or "8.0"'
+                          className="sb-input"
+                        />
+                      </div>
+                    )}
+                </div>
+              )}
+
+              {/* ACTION 8: Wait for Element */}
+              {modalStepData.action_type === "wait_for_element" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div>
+                    <label className="sb-label">Wait Condition</label>
+                    <select
+                      value={modalStepData.action_params?.condition || "visible"}
+                      onChange={(e) =>
+                        setModalStepData({
+                          ...modalStepData,
+                          action_params: { ...modalStepData.action_params, condition: e.target.value },
+                        })
+                      }
+                      className="sb-input"
+                    >
+                      <option value="visible">Wait until Element is Visible</option>
+                      <option value="hidden">Wait until Element is Hidden</option>
+                      <option value="attached">Wait until Element is Attached to DOM</option>
+                      <option value="duration">Pause for Duration (ms)</option>
+                    </select>
+                  </div>
+
+                  {modalStepData.action_params?.condition === "duration" ? (
+                    <div>
+                      <label className="sb-label">Duration (ms)</label>
+                      <input
+                        type="number"
+                        value={modalStepData.action_params?.duration_ms || 1000}
+                        onChange={(e) =>
+                          setModalStepData({
+                            ...modalStepData,
+                            action_params: { ...modalStepData.action_params, duration_ms: parseInt(e.target.value) || 1000 },
+                          })
+                        }
+                        className="sb-input"
+                      />
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {modalStepData.locator_value ? (
+                        <div className="sb-picked-card">
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div
+                              style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 6,
+                                background: "rgba(16, 185, 129, 0.15)",
+                                color: "var(--v-success)",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                              }}
+                            >
+                              <Check size={16} />
+                            </div>
+                            <div>
+                              <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                                {modalStepData.action_params?.element_friendly_name || modalStepData.locator_value}
+                              </div>
+                              <div style={{ fontSize: "0.72rem", color: "var(--v-text-secondary)", fontFamily: "monospace" }}>
+                                {modalStepData.locator_type || "smart"}: {modalStepData.locator_value}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="sb-picker-btn-mini"
+                            onClick={() => {
+                              setCurrentPickingTarget("main");
+                              setElementPickerOpen(true);
+                            }}
+                          >
+                            Pick Different Element
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="sb-picker-btn"
+                          style={{ justifyContent: "center", padding: "10px 16px" }}
+                          onClick={() => {
+                            setCurrentPickingTarget("main");
+                            setElementPickerOpen(true);
+                          }}
+                        >
+                          <Sparkles size={16} />
+                          Inspect & Pick Element to Wait For
+                        </button>
+                      )}
+
+                      <div>
+                        <label className="sb-label">Target Element Locator <b>*</b></label>
+                        <input
+                          type="text"
+                          value={modalStepData.locator_value || ""}
+                          onChange={(e) => setModalStepData({ ...modalStepData, locator_value: e.target.value })}
+                          placeholder='e.g. "#loading-spinner", ".results-table", or "Save Button"'
+                          className="sb-input"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Advanced Locator Strategy Selector (Progressive Disclosure) */}
+              {["fill_input", "click_element", "select_option", "verify_element", "wait_for_element"].includes(
+                modalStepData.action_type
+              ) && (
+                <div style={{ paddingTop: 8, borderTop: "1px solid var(--v-border)" }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedLocators(!showAdvancedLocators)}
+                    style={{ background: "transparent", border: "none", color: "var(--v-text-muted)", fontSize: "0.75rem", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0 }}
+                  >
+                    <Settings2 size={13} />
+                    Advanced Locator Strategy
+                    {showAdvancedLocators ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  </button>
+
+                  {showAdvancedLocators && (
+                    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: "var(--v-surface-2)", border: "1px solid var(--v-border)", display: "flex", flexDirection: "column", gap: 6 }}>
+                      <select
+                        value={modalStepData.locator_type || "smart"}
+                        onChange={(e) => setModalStepData({ ...modalStepData, locator_type: e.target.value })}
+                        className="sb-input"
+                      >
+                        {LOCATOR_STRATEGIES.map((strat) => (
+                          <option key={strat.value} value={strat.value}>
+                            {strat.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p style={{ margin: 0, fontSize: "0.7rem", color: "var(--v-text-muted)" }}>
+                        "Smart Dynamic" prioritizes accessible roles, form labels, and placeholders automatically before falling back to selectors.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
-            <form onSubmit={handleCreateDataProfile} className="form-stack">
-              <label className="field">
-                <span>New Profile Name</span>
-                <input
-                  type="text"
-                  placeholder="e.g. Employee Hours Matrix"
-                  value={newProfileName}
-                  onChange={(e) => setNewProfileName(e.target.value)}
-                  required
-                />
-              </label>
-
-              <label className="field">
-                <span>Dataset Rows (JSON Array)</span>
-                <textarea
-                  rows={5}
-                  value={newProfileRowsJson}
-                  onChange={(e) => setNewProfileRowsJson(e.target.value)}
-                  style={{ fontFamily: "monospace", fontSize: "0.85rem" }}
-                  required
-                />
-              </label>
-
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={() => setDataProfilesModalOpen(false)}
-                >
-                  Close
-                </button>
-                <button type="submit" className="button button-primary">
-                  <Plus size={14} /> Add Profile
-                </button>
-              </div>
-            </form>
+            {/* Modal Footer */}
+            <div className="sb-modal-footer">
+              <button
+                type="button"
+                onClick={() => setStepModalOpen(false)}
+                className="button button-secondary button-small"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveStepModal}
+                className="button button-primary button-small"
+              >
+                {editingStepIndex !== null ? "Save Changes" : "Add to Workflow"}
+              </button>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* =========================================================================
+          5. SAVE WORKFLOW MODAL
+      ========================================================================= */}
+      {showSaveModal && (
+        <div className="sb-modal-backdrop">
+          <div className="sb-modal-card" style={{ maxWidth: 440 }}>
+            <h3 style={{ margin: "0 0 4px 0", fontSize: "0.95rem", fontWeight: 700, color: "var(--v-text)" }}>
+              Save Reusable Workflow
+            </h3>
+            <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--v-text-secondary)" }}>
+              Save this {workflowSteps.length}-step sequence to reuse anytime on {projectName}.
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 16 }}>
+              <div>
+                <label className="sb-label">Workflow Name</label>
+                <input
+                  type="text"
+                  value={saveWorkflowTitle || workflowName}
+                  onChange={(e) => setSaveWorkflowTitle(e.target.value)}
+                  placeholder="e.g. End-to-End Login & Timesheet Entry"
+                  className="sb-input"
+                />
+              </div>
+
+              <div>
+                <label className="sb-label">Description (Optional)</label>
+                <textarea
+                  rows={2}
+                  value={saveWorkflowDesc}
+                  onChange={(e) => setSaveWorkflowDesc(e.target.value)}
+                  placeholder="Describe what this workflow validates..."
+                  className="sb-input"
+                  style={{ resize: "vertical" }}
+                />
+              </div>
+            </div>
+
+            <div className="sb-modal-footer">
+              <button
+                type="button"
+                onClick={() => setShowSaveModal(false)}
+                className="button button-secondary button-small"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveWorkflowSubmit()}
+                disabled={savingWorkflow}
+                className="button button-primary button-small"
+              >
+                {savingWorkflow ? "Saving..." : "Save Workflow"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          6. VISUAL ELEMENT PICKER & INSPECTOR MODAL
+      ========================================================================= */}
+      {elementPickerOpen && (
+        <ElementPickerModal
+          projectId={projectId}
+          projectName={projectName}
+          actionType={modalStepData.action_type}
+          onSelectElement={(el) => {
+            handlePickedElement(el);
+            setElementPickerOpen(false);
+          }}
+          onClose={() => setElementPickerOpen(false)}
+        />
       )}
     </div>
   );

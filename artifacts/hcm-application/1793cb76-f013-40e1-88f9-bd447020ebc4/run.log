@@ -1,0 +1,3 @@
+[2026-10-23 09:54:04 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 1793cb76-f013-40e1-88f9-bd447020ebc4)
+[2026-10-23 09:54:04 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-23 09:54:04 UTC] Browser: chromium (Headless: True)

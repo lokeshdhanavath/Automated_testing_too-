@@ -1,0 +1,11 @@
+[2026-10-23 07:09:10 UTC] Starting execution for: 'Smoke Verification Workflow' (Run ID: ff01b172-b6bb-4e9f-b1a4-3d39b3326dcb)
+[2026-10-23 07:09:10 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-23 07:09:10 UTC] Browser: chromium (Headless: True)
+[2026-10-23 07:09:11 UTC] [RUNNING] Step 1: Open registered base URL (action: open_app)
+[2026-10-23 07:09:11 UTC] Opening application at: https://oracleapex.com/ords/r/lokesh354/timesheet-application/
+[2026-10-23 07:09:17 UTC] [PASSED] Step 1 finished in 5215ms
+[2026-10-23 07:09:17 UTC] [RUNNING] Step 2: Wait 1.5 seconds for page load (action: wait_for_element)
+[2026-10-23 07:09:17 UTC] Pausing execution for 1500ms...
+[2026-10-23 07:09:18 UTC] [PASSED] Step 2 finished in 1540ms
+[2026-10-23 07:09:19 UTC] Workflow execution completed with status: PASSED
+[2026-10-23 07:09:19 UTC] Summary: 2/2 passed, 0 failed, 0 skipped.

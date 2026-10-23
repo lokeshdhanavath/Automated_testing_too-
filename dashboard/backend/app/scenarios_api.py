@@ -3,6 +3,7 @@ API Router for Generic Test Scenarios, Steps, App Credentials, and Test Data Pro
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from threading import Thread
@@ -84,6 +85,17 @@ class ScenarioRunPayload(BaseModel):
     credential_id: str | None = None
     data_profile_id: str | None = None
     dataset_row_index: int | None = 0
+
+
+class DynamicWorkflowPayload(BaseModel):
+    name: str = Field(default="Dynamic Browser Workflow", max_length=200)
+    description: str | None = None
+    environment: str = "QA"
+    credential_id: str | None = None
+    failure_policy: Literal["stop", "continue"] = "stop"
+    timeout_seconds: int = Field(default=90, ge=1, le=600)
+    steps: list[StepPayload] = Field(default_factory=list)
+    save_as_scenario: bool = False
 
 
 class DataProfilePayload(BaseModel):
@@ -333,7 +345,7 @@ def _execute_scenario_background(
     db: Session = SessionLocal()
     run_id_str = str(run_uuid)
     try:
-        scenario_engine.run_generic_scenario(
+        result = scenario_engine.run_generic_scenario(
             db=db,
             run_uuid=run_uuid,
             project=project,
@@ -341,6 +353,10 @@ def _execute_scenario_background(
             decrypted_credentials=decrypted_credentials,
             dataset_row=dataset_row,
         )
+        with lock:
+            if run_id_str in runs:
+                runs[run_id_str]["status"] = result.get("status", "passed")
+                runs[run_id_str]["summary"] = result.get("summary")
     except Exception as exc:
         db_service.update_test_run(
             db,
@@ -400,7 +416,7 @@ def trigger_scenario_run(scenario_id: str, payload: ScenarioRunPayload):
             except Exception:
                 pass
 
-        # If still none and application is NOT apex-timesheet, do NOT fallback to APEX credentials
+        # If still none, check if project specifies custom environment variable names
         if not decrypted_cred:
             user_env = project.get("username_env_var")
             pass_env = project.get("password_env_var")
@@ -408,11 +424,6 @@ def trigger_scenario_run(scenario_id: str, payload: ScenarioRunPayload):
                 decrypted_cred = {
                     "username": os.getenv(user_env, ""),
                     "secret": os.getenv(pass_env, "") if pass_env else "",
-                }
-            elif project.get("external_id") == "apex-timesheet":
-                decrypted_cred = {
-                    "username": os.getenv("APEX_USERNAME", ""),
-                    "secret": os.getenv("APEX_PASSWORD", ""),
                 }
 
         # Resolve dataset row if specified
@@ -493,4 +504,153 @@ def trigger_scenario_run(scenario_id: str, payload: ScenarioRunPayload):
         raise HTTPException(status_code=400, detail="Invalid UUID.")
     finally:
         db.close()
+
+
+@router.post("/projects/{project_id}/workflows/run")
+def trigger_dynamic_workflow_run(project_id: str, payload: DynamicWorkflowPayload):
+    """
+    Executes an ad-hoc dynamic workflow on-the-fly without requiring
+    predefined test suites or python scripts.
+    Automatically retrieves the application's base URL and vault credentials.
+    """
+    from app.main import runs, lock, active_run_id
+    import app.main as main_mod
+
+    db: Session = SessionLocal()
+    try:
+        project = db_service.resolve_project(db, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found.")
+
+        project_uuid = project["id"]
+
+        # Check concurrency lock
+        with lock:
+            if main_mod.active_run_id is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Another test run is already in progress.",
+                )
+
+        # Securely resolve credentials from DB vault without requiring user re-entry
+        decrypted_cred = None
+        if payload.credential_id:
+            try:
+                decrypted_cred = credentials_service.get_decrypted_credential(db, uuid.UUID(payload.credential_id))
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to load credentials: {e}")
+
+        if not decrypted_cred:
+            try:
+                proj_creds = credentials_service.list_credentials(db, project_uuid)
+                if proj_creds:
+                    target_env = str(payload.environment or project.get("default_environment", "QA")).lower()
+                    matched = next((c for c in proj_creds if str(c.get("environment", "")).lower() == target_env), proj_creds[0])
+                    decrypted_cred = credentials_service.get_decrypted_credential(db, uuid.UUID(matched["id"]))
+            except Exception:
+                pass
+
+        if not decrypted_cred:
+            user_env = project.get("username_env_var")
+            pass_env = project.get("password_env_var")
+            if user_env and os.getenv(user_env):
+                decrypted_cred = {
+                    "username": os.getenv(user_env, ""),
+                    "secret": os.getenv(pass_env, "") if pass_env else "",
+                }
+
+        # Build steps representation
+        steps_dicts = []
+        for idx, s in enumerate(payload.steps, start=1):
+            steps_dicts.append({
+                "step_order": s.step_order or idx,
+                "action_type": s.action_type,
+                "locator_type": s.locator_type,
+                "locator_value": s.locator_value or "",
+                "action_params": s.action_params or {},
+                "description": s.description or f"Step {idx}: {s.action_type}",
+                "is_enabled": s.is_enabled,
+                "timeout_ms": s.timeout_ms,
+            })
+
+        scenario_uuid = None
+        if payload.save_as_scenario:
+            try:
+                saved = scenarios_service.create_scenario(
+                    db=db,
+                    project_id=project_uuid,
+                    name=payload.name,
+                    description=payload.description or "Dynamic workflow saved from Scenario Builder",
+                    tags=["dynamic-workflow"],
+                    failure_policy=payload.failure_policy,
+                    timeout_seconds=payload.timeout_seconds,
+                    environment=payload.environment,
+                    credential_id=uuid.UUID(payload.credential_id) if payload.credential_id else None,
+                    steps=steps_dicts,
+                )
+                scenario_uuid = uuid.UUID(saved["id"])
+            except Exception:
+                pass
+
+        scenario_dict = {
+            "id": str(scenario_uuid) if scenario_uuid else None,
+            "name": payload.name,
+            "environment": payload.environment,
+            "failure_policy": payload.failure_policy,
+            "timeout_seconds": payload.timeout_seconds,
+            "steps": steps_dicts,
+        }
+
+        run_uuid = uuid.uuid4()
+        run_id_str = str(run_uuid)
+
+        # Initialize in-memory run tracking
+        with lock:
+            main_mod.runs[run_id_str] = {
+                "id": run_id_str,
+                "project_id": project["external_id"],
+                "status": "queued",
+                "created_at": time.time(),
+                "logs": f"Queued dynamic workflow: {payload.name} ({len(steps_dicts)} steps)\n",
+                "exit_code": None,
+                "summary": None,
+                "test_ids": [f"Workflow: {payload.name}"],
+            }
+            main_mod.active_run_id = run_id_str
+
+        # Persist test run in DB
+        db_service.create_test_run(
+            db=db,
+            run_uuid=run_uuid,
+            project_uuid=project_uuid,
+            environment=payload.environment,
+            browser=project.get("browser", "chromium"),
+            selected_tests=[f"Workflow: {payload.name}"],
+        )
+
+        if scenario_uuid:
+            db.execute(
+                db_service.text("UPDATE test_runs SET scenario_id = :sid WHERE id = :rid"),
+                {"sid": scenario_uuid, "rid": run_uuid},
+            )
+            db.commit()
+
+        # Launch background execution thread
+        Thread(
+            target=_execute_scenario_background,
+            args=(run_uuid, project, scenario_dict, decrypted_cred, None),
+            daemon=True,
+        ).start()
+
+        return {
+            "run_id": run_id_str,
+            "project_id": project["external_id"],
+            "scenario_id": str(scenario_uuid) if scenario_uuid else None,
+            "status": "queued",
+        }
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID.")
+    finally:
+        db.close()
+
 

@@ -1,0 +1,3 @@
+[2026-10-23 10:10:39 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 09085788-bee3-49f3-ad2c-950b5b2bd934)
+[2026-10-23 10:10:39 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-23 10:10:39 UTC] Browser: chromium (Headless: True)

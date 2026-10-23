@@ -1,0 +1,53 @@
+[2026-10-23 11:44:15 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 669014ad-28cf-47ca-8b4f-1d037d20c22c)
+[2026-10-23 11:44:15 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-23 11:44:15 UTC] Browser: chromium (Headless: True)
+[2026-10-23 11:44:19 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-23 11:44:19 UTC] Opening application at: https://oracleapex.com/ords/r/lokesh354/timesheet-application/
+[2026-10-23 11:44:24 UTC] [PASSED] Step 1 finished in 5016ms
+[2026-10-23 11:44:24 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-23 11:44:24 UTC] Entering username for account 'lokesh' into login form...
+[2026-10-23 11:44:24 UTC] Entering encrypted vault password into password field...
+[2026-10-23 11:44:24 UTC] Submitting login form...
+[2026-10-23 11:44:32 UTC] Navigation menu is collapsed (#t_Button_navControl, aria-expanded=false). Automatically expanding...
+[2026-10-23 11:44:33 UTC] [PASSED] Step 2 finished in 8907ms
+[2026-10-23 11:44:33 UTC] [RUNNING] Step 3: Navigate to My Timesheet (action: navigate)
+[2026-10-23 11:44:33 UTC] Navigating by clicking UI link/menu item 'My Timesheet'...
+[2026-10-23 11:44:33 UTC] [DEBUG] Attempt 1 locator: <Locator frame=<Frame name= url='https://oracleapex.com/ords/r/lokesh354/timesheet-application/home?session=107854870708147'> selector='internal:role=link[name="My Timesheet"i]'> (count=0)
+[2026-10-23 11:44:41 UTC] [DEBUG] Click attempt 1 failed: TimeoutError: Locator.wait_for: Timeout 8000ms exceeded.
+Call log:
+  - waiting for get_by_role("link", name="My Timesheet").first to b
+[2026-10-23 11:44:41 UTC] [DEBUG] Attempt 2 locator: <Locator frame=<Frame name= url='https://oracleapex.com/ords/r/lokesh354/timesheet-application/home?session=107854870708147'> selector='internal:role=link[name="My Timesheet"i]'> (count=0)
+[2026-10-23 11:44:49 UTC] [DEBUG] Click attempt 2 failed: TimeoutError: Locator.wait_for: Timeout 8000ms exceeded.
+Call log:
+  - waiting for get_by_role("link", name="My Timesheet").first to b
+[2026-10-23 11:44:49 UTC] [DEBUG] Attempt 3 locator: <Locator frame=<Frame name= url='https://oracleapex.com/ords/r/lokesh354/timesheet-application/home?session=107854870708147'> selector='internal:role=link[name="My Timesheet"i]'> (count=0)
+[2026-10-23 11:44:58 UTC] [DEBUG] Click attempt 3 failed: TimeoutError: Locator.wait_for: Timeout 8000ms exceeded.
+Call log:
+  - waiting for get_by_role("link", name="My Timesheet").first to b
+[2026-10-23 11:44:58 UTC] Attempting force click on 'My Timesheet'...
+[2026-10-23 11:45:33 UTC] Attempting JavaScript evaluation click on 'My Timesheet'...
+[2026-10-23 11:46:03 UTC] Searching DOM for interactive element matching text 'My Timesheet'...
+[2026-10-23 11:46:03 UTC] Successfully clicked DOM element matching text 'My Timesheet'.
+[2026-10-23 11:46:05 UTC] [PASSED] Step 3 finished in 91385ms
+[2026-10-23 11:46:05 UTC] [RUNNING] Step 4: Navigate to Whereabouts (action: navigate)
+[2026-10-23 11:46:05 UTC] Navigating by clicking UI link/menu item 'Whereabouts'...
+[2026-10-23 11:46:05 UTC] [DEBUG] Attempt 1 locator: <Locator frame=<Frame name= url='https://oracleapex.com/ords/r/lokesh354/timesheet-application/my-timesheet1?session=107854870708147'> selector='internal:role=link[name="Whereabouts"i]'> (count=0)
+[2026-10-23 11:46:13 UTC] [DEBUG] Click attempt 1 failed: TimeoutError: Locator.wait_for: Timeout 8000ms exceeded.
+Call log:
+  - waiting for get_by_role("link", name="Whereabouts").first to be
+[2026-10-23 11:46:13 UTC] [DEBUG] Attempt 2 locator: <Locator frame=<Frame name= url='https://oracleapex.com/ords/r/lokesh354/timesheet-application/my-timesheet1?session=107854870708147'> selector='internal:role=link[name="Whereabouts"i]'> (count=0)
+[2026-10-23 11:46:21 UTC] [DEBUG] Click attempt 2 failed: TimeoutError: Locator.wait_for: Timeout 8000ms exceeded.
+Call log:
+  - waiting for get_by_role("link", name="Whereabouts").first to be
+[2026-10-23 11:46:21 UTC] [DEBUG] Attempt 3 locator: <Locator frame=<Frame name= url='https://oracleapex.com/ords/r/lokesh354/timesheet-application/my-timesheet1?session=107854870708147'> selector='internal:role=link[name="Whereabouts"i]'> (count=0)
+[2026-10-23 11:46:29 UTC] [DEBUG] Click attempt 3 failed: TimeoutError: Locator.wait_for: Timeout 8000ms exceeded.
+Call log:
+  - waiting for get_by_role("link", name="Whereabouts").first to be
+[2026-10-23 11:46:29 UTC] Attempting force click on 'Whereabouts'...
+[2026-10-23 11:47:04 UTC] Attempting JavaScript evaluation click on 'Whereabouts'...
+[2026-10-23 11:47:34 UTC] Searching DOM for interactive element matching text 'Whereabouts'...
+[2026-10-23 11:47:34 UTC] Successfully clicked DOM element matching text 'Whereabouts'.
+[2026-10-23 11:47:36 UTC] [PASSED] Step 4 finished in 91579ms
+[2026-10-23 11:47:54 UTC] Video saved and registered: recording.webm
+[2026-10-23 11:47:54 UTC] Workflow execution completed with status: PASSED
+[2026-10-23 11:47:54 UTC] Summary: 4/4 passed, 0 failed, 0 skipped.

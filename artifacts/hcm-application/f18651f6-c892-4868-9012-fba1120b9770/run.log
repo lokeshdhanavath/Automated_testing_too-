@@ -1,0 +1,20 @@
+[2026-10-23 11:11:35 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: f18651f6-c892-4868-9012-fba1120b9770)
+[2026-10-23 11:11:35 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-23 11:11:35 UTC] Browser: chromium (Headless: True)
+[2026-10-23 11:11:37 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-23 11:11:37 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-23 11:12:37 UTC] [ERROR] Step 1 failed: Page.goto: Timeout 60000ms exceeded.
+Call log:
+  - navigating to "https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/", waiting until "domcontentloaded"
+
+[2026-10-23 11:13:07 UTC] Could not capture failure screenshot: Page.screenshot: Timeout 30000ms exceeded.
+Call log:
+  - taking page screenshot
+  - waiting for fonts to load...
+  - fonts loaded
+
+[2026-10-23 11:13:07 UTC] Scenario failure policy is 'stop'. Aborting remaining steps.
+[2026-10-23 11:13:07 UTC] [SKIPPED] Step 2: Login with vault credentials
+[2026-10-23 11:13:09 UTC] Video saved and registered: recording.webm
+[2026-10-23 11:13:09 UTC] Workflow execution completed with status: FAILED
+[2026-10-23 11:13:09 UTC] Summary: 0/2 passed, 1 failed, 1 skipped.

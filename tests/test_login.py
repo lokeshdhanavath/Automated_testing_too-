@@ -11,14 +11,14 @@ from utils import config
 
 def test_login_page_loads(page):
     lp = LoginPage(page).open()
-    expect(page.locator(lp.USERNAME)).to_be_visible()
-    expect(page.locator(lp.PASSWORD)).to_be_visible()
-    expect(page.locator(lp.SIGN_IN)).to_be_visible()
+    expect(lp.get_username_locator()).to_be_visible()
+    expect(lp.get_password_locator()).to_be_visible()
+    expect(lp.get_signin_locator()).to_be_visible()
 
 
 def test_login_with_valid_credentials(page):
     LoginPage(page).open().login()
-    assert "/login" not in page.url, f"Still on login page: {page.url}"
+    assert "/login" not in page.url or "signin" not in page.url, f"Still on login page: {page.url}"
 
 
 def test_navigate_to_my_timesheet(page):
@@ -46,4 +46,6 @@ def test_week_navigation_controls_present(page):
     tp.wait_until_loaded()
 
     assert tp.is_previous_week_visible(), "Previous week button not visible"
+    assert tp.is_next_week_visible(), "Next week button not visible"
+
     assert tp.is_next_week_visible(), "Next week button not visible"

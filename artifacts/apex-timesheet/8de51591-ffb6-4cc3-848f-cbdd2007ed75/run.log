@@ -1,0 +1,25 @@
+[2026-10-23 09:19:59 UTC] Starting execution for: 'Login and navigate to my timesheet' (Run ID: 8de51591-ffb6-4cc3-848f-cbdd2007ed75)
+[2026-10-23 09:19:59 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-23 09:19:59 UTC] Browser: chromium (Headless: True)
+[2026-10-23 09:20:04 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-23 09:20:04 UTC] Opening application at: https://oracleapex.com/ords/r/lokesh354/timesheet-application/
+[2026-10-23 09:20:13 UTC] [PASSED] Step 1 finished in 9460ms
+[2026-10-23 09:20:13 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-23 09:20:13 UTC] Entering username for account 'lokesh' into login form...
+[2026-10-23 09:20:13 UTC] Entering encrypted vault password into password field...
+[2026-10-23 09:20:13 UTC] Submitting login form...
+[2026-10-23 09:20:15 UTC] [PASSED] Step 2 finished in 1677ms
+[2026-10-23 09:20:15 UTC] [RUNNING] Step 3: Navigate to page path (action: navigate)
+[2026-10-23 09:20:15 UTC] Navigating by clicking UI element 'My Timesheet'...
+[2026-10-23 09:21:15 UTC] [ERROR] Step 3 failed: Locator.click: Timeout 60000ms exceeded.
+Call log:
+  - waiting for get_by_text("My Timesheet")
+    - locator resolved to <a title="" target="" data-otel-label="" href="/ords/r/lokesh354/timesheet-application/my-timesheet1?session=104065408455787">My Timesheet</a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+  - element was detached from the DOM, retrying
+
+[2026-10-23 09:21:15 UTC] Failure screenshot captured: failure_step_3.png
+[2026-10-23 09:21:15 UTC] Scenario failure policy is 'stop'. Aborting remaining steps.
+[2026-10-23 09:21:17 UTC] Workflow execution completed with status: FAILED
+[2026-10-23 09:21:17 UTC] Summary: 2/3 passed, 1 failed, 0 skipped.

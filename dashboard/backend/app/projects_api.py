@@ -97,6 +97,8 @@ class ProjectPayload(BaseModel):
     capture_video: bool = False
     username_env_var: str = Field(default="", max_length=100)
     password_env_var: str = Field(default="", max_length=100)
+    initial_username: str = Field(default="", max_length=255)
+    initial_password: str = Field(default="", max_length=1024)
     description: str = Field(default="", max_length=1000)
     test_timeout_seconds: int = Field(default=60, ge=5, le=600)
     navigation_timeout_seconds: int = Field(default=30, ge=5, le=300)
@@ -150,7 +152,16 @@ class ProjectPayload(BaseModel):
         return value
 
 
-def _project_dict(row) -> dict:
+def _safe_iso(val: Any) -> str:
+    """Safely return ISO 8601 formatted string whether input is datetime, str, or None."""
+    if not val:
+        return ""
+    if hasattr(val, "isoformat"):
+        return val.isoformat()
+    return str(val)
+
+
+def _project_dict(row, primary_cred=None) -> dict:
     """Convert a PostgreSQL row to the existing API response format."""
     return {
         "id": row["external_id"],
@@ -165,6 +176,11 @@ def _project_dict(row) -> dict:
         "capture_video": row["capture_video"],
         "username_env_var": row["username_env_var"] or "",
         "password_env_var": row["password_env_var"] or "",
+        "initial_username": primary_cred.get("username", "") if primary_cred else "",
+        "initial_password": "",
+        "primary_username": primary_cred.get("username", "") if primary_cred else "",
+        "primary_masked_secret": primary_cred.get("masked_secret", "") if primary_cred else "",
+        "has_credentials": bool(primary_cred),
         "description": row.get("description") or "",
         "test_timeout_seconds": row.get("test_timeout_seconds") or 60,
         "navigation_timeout_seconds": row.get("navigation_timeout_seconds") or 30,
@@ -172,14 +188,15 @@ def _project_dict(row) -> dict:
         "auth_method": row.get("auth_method") or "form",
         "is_default": row["is_default"],
         "is_active": bool(row["is_active"]) if row.get("is_active") is not None else True,
-        "created_at": row["created_at"].isoformat(),
-        "updated_at": row["updated_at"].isoformat(),
+        "created_at": _safe_iso(row.get("created_at")),
+        "updated_at": _safe_iso(row.get("updated_at")),
     }
 
 
-def _insert_project(db, project: dict) -> None:
+def _insert_project(db, project: dict):
     """Insert one project into PostgreSQL."""
     now = _now()
+    proj_uuid = uuid4()
 
     db.execute(
         text(
@@ -203,7 +220,7 @@ def _insert_project(db, project: dict) -> None:
             """
         ),
         {
-            "id": str(uuid4()),
+            "id": str(proj_uuid),
             "external_id": project["id"],
             "name": project["name"],
             "project_type": project["project_type"],
@@ -226,6 +243,7 @@ def _insert_project(db, project: dict) -> None:
             "updated_at": project.get("updated_at", now),
         },
     )
+    return proj_uuid
 
 
 def _ensure_projects_exist() -> None:
@@ -274,7 +292,13 @@ def _list_projects_from_db() -> list[dict]:
             )
         ).mappings().all()
 
-        return [_project_dict(row) for row in rows]
+        from app import credentials_service
+        items = []
+        for row in rows:
+            creds = credentials_service.list_credentials(db, row["id"])
+            primary_c = creds[0] if creds else None
+            items.append(_project_dict(row, primary_c))
+        return items
 
     finally:
         db.close()
@@ -321,10 +345,24 @@ def create_project(payload: ProjectPayload):
                     "updated_at": now,
                 }
 
-                _insert_project(db, project)
+                proj_uuid = _insert_project(db, project)
+                if payload.initial_username and payload.initial_password:
+                    from app import credentials_service
+                    credentials_service.create_credential(
+                        db=db,
+                        project_id=proj_uuid,
+                        name="Primary Login",
+                        username=payload.initial_username,
+                        secret=payload.initial_password,
+                        environment=payload.default_environment,
+                        description="Primary login credentials",
+                    )
                 db.commit()
 
-                return project
+                from app import credentials_service
+                creds = credentials_service.list_credentials(db, proj_uuid)
+                primary_c = creds[0] if creds else None
+                return _project_dict({**project, "external_id": project_id, "is_active": True}, primary_c)
 
             except IntegrityError as exc:
                 db.rollback()
@@ -408,8 +446,36 @@ def update_project(project_id: str, payload: ProjectPayload):
             },
         )
 
+        if payload.initial_username:
+            from app import credentials_service
+            import uuid as py_uuid
+            existing_creds = credentials_service.list_credentials(db, row["id"])
+            if existing_creds:
+                first_c = existing_creds[0]
+                credentials_service.update_credential(
+                    db=db,
+                    credential_id=py_uuid.UUID(first_c["id"]),
+                    username=payload.initial_username,
+                    secret=payload.initial_password if payload.initial_password else None,
+                    environment=payload.default_environment,
+                )
+            elif payload.initial_password:
+                credentials_service.create_credential(
+                    db=db,
+                    project_id=row["id"],
+                    name="Primary Login",
+                    username=payload.initial_username,
+                    secret=payload.initial_password,
+                    environment=payload.default_environment,
+                    description="Primary login credentials",
+                )
+
         db.commit()
-        return updated
+
+        from app import credentials_service
+        creds = credentials_service.list_credentials(db, row["id"])
+        primary_c = creds[0] if creds else None
+        return _project_dict({**row, **payload.model_dump(), "updated_at": updated["updated_at"]}, primary_c)
 
     except HTTPException:
         db.rollback()
@@ -427,6 +493,13 @@ def update_project(project_id: str, payload: ProjectPayload):
         raise HTTPException(
             status_code=500,
             detail="Unable to update project in PostgreSQL.",
+        ) from exc
+
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error updating application: {exc}",
         ) from exc
 
     finally:

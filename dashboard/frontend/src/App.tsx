@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   Activity,
-  Archive,
   Camera,
   CheckCircle2,
   CircleAlert,
@@ -16,7 +15,6 @@ import {
   Film,
   FlaskConical,
   FolderKanban,
-  Gauge,
   HardDrive,
   KeyRound,
   Layers,
@@ -30,6 +28,7 @@ import {
   Save,
   Search,
   Settings2,
+  Square,
   SquareTerminal,
   Trash2,
   Video,
@@ -42,8 +41,10 @@ import {
   checkBackendHealth,
   getTestCases,
   startRun,
+  stopRun,
   getRunStatus,
   getRunLogs,
+  getRuns,
   getProjectRuns,
   getProjectArtifacts,
   validateCsvScenarios,
@@ -74,7 +75,7 @@ import "./App.css";
 type Page =
   | "Applications"
   | "Overview"
-  | "Scenario Builder"
+  | "Workflow Studio"
   | "Credentials"
   | "Test Suites"
   | "CSV Scenarios"
@@ -106,21 +107,15 @@ const navigation: {
     section: "WORKSPACE",
     items: [
       { label: "Overview", icon: LayoutDashboard },
-      { label: "Scenario Builder", icon: Layers },
+      { label: "Applications", icon: FolderKanban },
+      { label: "Workflow Studio", icon: Layers },
       { label: "Credentials", icon: KeyRound },
     ],
   },
   {
-    section: "TESTING",
+    section: "EXECUTION",
     items: [
-      { label: "Test Suites", icon: ListChecks },
-      { label: "CSV Scenarios", icon: FileText },
       { label: "Test Runs", icon: Play },
-    ],
-  },
-  {
-    section: "EVIDENCE",
-    items: [
       { label: "Test Evidence", icon: FileBarChart },
       { label: "Screenshots & Recordings", icon: Camera },
     ],
@@ -145,6 +140,7 @@ export default function App() {
   const [selectedRunFilter, setSelectedRunFilter] = useState<string>("all");
   const [previewImage, setPreviewImage] = useState<ArtifactItem | null>(null);
   const [projectRuns, setProjectRuns] = useState<RunRecord[]>([]);
+  const [allRuns, setAllRuns] = useState<RunRecord[]>([]);
   const [runTestResults, setRunTestResults] = useState<TestResultItem[]>([]);
   const [stepResults, setStepResults] = useState<StepExecutionResult[]>([]);
 
@@ -162,6 +158,7 @@ export default function App() {
     test_directory: "tests", default_environment: "QA", browser: "chromium",
     headless: true, capture_screenshots: true, capture_video: false,
     username_env_var: "", password_env_var: "",
+    initial_username: "", initial_password: "",
     description: "", test_timeout_seconds: 60,
     navigation_timeout_seconds: 30, default_wait_ms: 500, auth_method: "form",
   };
@@ -278,12 +275,27 @@ async function loadTests(projectId?: string) {
   }
 
   async function loadProjectRuns() {
-    if (!activeProjectId) return;
     try {
-      const runsList = await getProjectRuns(activeProjectId);
-      setProjectRuns(runsList);
+      const [allList, projectList] = await Promise.all([
+        getRuns().catch(() => []),
+        activeProjectId ? getProjectRuns(activeProjectId).catch(() => []) : Promise.resolve([]),
+      ]);
+      setAllRuns(allList);
+      setProjectRuns(projectList);
     } catch {
       // ignore
+    }
+  }
+
+  async function handleStopCurrentRun() {
+    try {
+      await stopRun(activeRunId || undefined);
+      addLog("[System] Execution stop requested by user.");
+      setRunStatus("cancelled");
+      setRunning(false);
+      void loadProjectRuns();
+    } catch (err) {
+      addLog(`[System] Failed to stop run: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -310,7 +322,7 @@ async function loadTests(projectId?: string) {
     }
   }
 
-  async function refreshProjects() {
+  async function refreshProjects(retryCount = 0) {
     setProjectsLoading(true);
     setProjectError("");
     try {
@@ -319,6 +331,10 @@ async function loadTests(projectId?: string) {
       setActiveProjectId((current) => result.some((project) => project.id === current)
         ? current : (result[0]?.id ?? "apex-timesheet"));
     } catch (error) {
+      if (retryCount < 2) {
+        setTimeout(() => void refreshProjects(retryCount + 1), 1200);
+        return;
+      }
       setProjectError(error instanceof Error ? error.message : "Unable to load projects.");
     } finally {
       setProjectsLoading(false);
@@ -348,6 +364,8 @@ async function loadTests(projectId?: string) {
       capture_video: project.capture_video,
       username_env_var: project.username_env_var || "",
       password_env_var: project.password_env_var || "",
+      initial_username: project.primary_username || project.initial_username || "",
+      initial_password: "",
       description: project.description || "",
       test_timeout_seconds: project.test_timeout_seconds || 60,
       navigation_timeout_seconds: project.navigation_timeout_seconds || 30,
@@ -719,30 +737,12 @@ async function loadTests(projectId?: string) {
                     >
                       <Icon size={18} />
                       <span>{item.label}</span>
-                      {item.label === "Test Suites" && (
-                        <span className="nav-count">{tests.length}</span>
-                      )}
                     </button>
                   );
                 })}
               </div>
             ))}
           </nav>
-
-          <div className="sidebar-bottom">
-            <div className="backend-indicator">
-              <span
-                className={`status-dot ${
-                  backendStatus === "Connected" ? "online" : "offline"
-                }`}
-              />
-              <div>
-                <strong>{backendStatus}</strong>
-                <span>API connection</span>
-              </div>
-            </div>
-            <div className="sidebar-version">Veriqon v2.0 · Local workspace</div>
-          </div>
         </aside>
       )}
 
@@ -754,26 +754,40 @@ async function loadTests(projectId?: string) {
                 <div className="brand-mark" style={{ width: 32, height: 32, borderRadius: 8 }}>
                   <FlaskConical size={18} />
                 </div>
-                <strong style={{ fontSize: "1rem", letterSpacing: "-0.01em" }}>Veriqon Application Hub</strong>
+                <strong style={{ fontSize: "1rem", letterSpacing: "-0.01em", color: "var(--v-text)" }}>Veriqon Automation</strong>
               </div>
             ) : (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span
-                  style={{ cursor: "pointer", color: "var(--v-accent)", fontWeight: 600 }}
-                  onClick={() => setPage("Applications")}
-                  title="Return to Applications Manager"
-                >
-                  Applications
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span className="topbar-app-badge">
+                  <FolderKanban size={13} style={{ color: "var(--v-accent)" }} />
+                  {activeProject?.name || "Application"}
                 </span>
-                <span>/</span>
-                <span style={{ fontWeight: 600, color: "var(--v-text)" }}>{activeProject?.name}</span>
-                <span>/</span>
-                <strong>{page}</strong>
+                <span style={{ color: "var(--v-border)", userSelect: "none" }}>|</span>
+                <span style={{ fontSize: "0.92rem", fontWeight: 700, color: "var(--v-text)" }}>{page}</span>
               </div>
             )}
           </div>
 
           <div className="topbar-actions">
+            {running && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div className="topbar-running-pill">
+                  <div className="vq-pulse-dot" />
+                  <span>Executing workflow…</span>
+                </div>
+                <button
+                  type="button"
+                  className="button button-danger button-small"
+                  onClick={() => void handleStopCurrentRun()}
+                  title="Immediately terminate the running execution"
+                  style={{ background: "#dc2626", borderColor: "#b91c1c", color: "#ffffff", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}
+                >
+                  <Square size={13} fill="currentColor" />
+                  Stop Run
+                </button>
+              </div>
+            )}
+
             {page !== "Applications" ? (
               <button
                 className="button button-primary button-small change-project-button"
@@ -791,22 +805,6 @@ async function loadTests(projectId?: string) {
                 <Plus size={15} /> Add Application
               </button>
             )}
-            <span className="connection-label">
-              <span
-                className={`status-dot ${
-                  backendStatus === "Connected" ? "online" : "offline"
-                }`}
-              />
-              {backendStatus}
-            </span>
-            <button
-              className="button button-secondary button-small"
-              onClick={() => void loadTests()}
-              disabled={loadingTests}
-            >
-              <RefreshCw size={15} />
-              Refresh
-            </button>
           </div>
         </header>
 
@@ -820,7 +818,22 @@ async function loadTests(projectId?: string) {
                 action={<button type="button" className="button button-primary" onClick={startAddProject}><Plus size={16} /> Add application</button>}
               />
 
-              {projectError && <div className="project-alert project-alert-error"><CircleAlert size={17} />{projectError}</div>}
+              {projectError && (
+                <div className="project-alert project-alert-error" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <CircleAlert size={17} />
+                    <span>{projectError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button-small button-secondary"
+                    onClick={() => void refreshProjects()}
+                    style={{ padding: "4px 12px", fontSize: "0.8rem", height: "auto" }}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
               {projectMessage && <div className="project-alert project-alert-success"><CheckCircle2 size={17} />{projectMessage}</div>}
 
               {projectFormOpen && (
@@ -836,7 +849,6 @@ async function loadTests(projectId?: string) {
                       <label className="project-field"><span>Application type</span><select value={projectForm.project_type} onChange={(event) => setProjectForm({ ...projectForm, project_type: event.target.value as ProjectPayload["project_type"] })}><option>Web application</option><option>API application</option><option>Full-stack application</option></select></label>
                       <label className="project-field project-field-wide"><span>Base URL <b>*</b></span><input required type="url" value={projectForm.base_url} onChange={(event) => setProjectForm({ ...projectForm, base_url: event.target.value })} placeholder="https://application.example" /><small>The target URL of the application under test.</small></label>
                       <label className="project-field project-field-wide"><span>Description</span><input maxLength={500} value={projectForm.description || ""} onChange={(event) => setProjectForm({ ...projectForm, description: event.target.value })} placeholder="Application overview, test scope, or notes" /></label>
-                      <label className="project-field"><span>Test directory</span><input required value={projectForm.test_directory} onChange={(event) => setProjectForm({ ...projectForm, test_directory: event.target.value })} placeholder="tests" /><small>Relative path inside your workspace.</small></label>
                       <label className="project-field"><span>Default environment</span><select value={projectForm.default_environment} onChange={(event) => setProjectForm({ ...projectForm, default_environment: event.target.value as ProjectPayload["default_environment"] })}><option>Development</option><option>QA</option><option>Staging</option><option>Production</option></select></label>
                       <label className="project-field"><span>Default browser</span><select value={projectForm.browser} onChange={(event) => setProjectForm({ ...projectForm, browser: event.target.value as ProjectPayload["browser"] })}><option value="chromium">Chromium</option><option value="firefox">Firefox</option><option value="webkit">WebKit</option></select></label>
                       <label className="project-field"><span>Test timeout (seconds)</span><input type="number" min={5} max={600} value={projectForm.test_timeout_seconds || 60} onChange={(event) => setProjectForm({ ...projectForm, test_timeout_seconds: Number(event.target.value) })} /></label>
@@ -851,10 +863,33 @@ async function loadTests(projectId?: string) {
                       <label><input type="checkbox" checked={projectForm.capture_video} onChange={(event) => setProjectForm({ ...projectForm, capture_video: event.target.checked })} /><span><strong>Capture video</strong><small>Record full browser session videos</small></span></label>
                     </div>
 
-                    <div className="project-secrets-note"><Settings2 size={17} /><div><strong>Credential references (optional)</strong><p>Enter environment-variable names for fallback lookup, or configure encrypted credentials directly below.</p></div></div>
+                    <div className="project-secrets-note">
+                      <KeyRound size={17} style={{ color: "var(--vq-primary)" }} />
+                      <div>
+                        <strong>Default Application Credentials (PostgreSQL Vault)</strong>
+                        <p>Credentials are encrypted with Fernet and saved directly into PostgreSQL. No credentials are stored in `.env`.</p>
+                      </div>
+                    </div>
                     <div className="project-form-grid project-credentials-grid">
-                      <label className="project-field"><span>Username environment variable</span><input value={projectForm.username_env_var} onChange={(event) => setProjectForm({ ...projectForm, username_env_var: event.target.value.replace(/[^A-Za-z0-9_]/g, "") })} placeholder="APEX_QA_USERNAME" /></label>
-                      <label className="project-field"><span>Password/token environment variable</span><input value={projectForm.password_env_var} onChange={(event) => setProjectForm({ ...projectForm, password_env_var: event.target.value.replace(/[^A-Za-z0-9_]/g, "") })} placeholder="APEX_QA_PASSWORD" /></label>
+                      <label className="project-field">
+                        <span>Login Username / Account</span>
+                        <input
+                          value={projectForm.initial_username || ""}
+                          onChange={(event) => setProjectForm({ ...projectForm, initial_username: event.target.value })}
+                          placeholder="e.g. ADMIN1 or lokesh"
+                        />
+                        <small>Saved directly to this application's encrypted credential vault.</small>
+                      </label>
+                      <label className="project-field">
+                        <span>Login Password</span>
+                        <input
+                          type="password"
+                          value={projectForm.initial_password || ""}
+                          onChange={(event) => setProjectForm({ ...projectForm, initial_password: event.target.value })}
+                          placeholder={editingProjectId ? "•••••••• (Leave blank to keep current password)" : "Enter password"}
+                        />
+                        <small>Encrypted with Fernet before database storage.</small>
+                      </label>
                     </div>
 
                     <div className="project-form-actions">
@@ -916,7 +951,19 @@ async function loadTests(projectId?: string) {
                       <h3>{project.name}</h3>
                       <p className="project-card-type">{project.project_type} · {project.default_environment}</p>
                       <div className="project-card-url"><span>BASE URL</span><code title={project.base_url}>{project.base_url}</code></div>
-                      <div className="project-card-meta"><span><b>Test directory</b><code>{project.test_directory}</code></span><span><b>Browser</b><code>{project.browser}</code></span></div>
+                      <div className="project-card-meta"><span><b>Environment</b><code>{project.default_environment}</code></span><span><b>Browser</b><code>{project.browser}</code></span></div>
+                      <div className="project-card-meta" style={{ marginTop: 4 }}>
+                        <span>
+                          <b>Vault Login</b>
+                          {project.has_credentials ? (
+                            <code style={{ color: "var(--vq-emerald)", background: "rgba(16, 185, 129, 0.08)", borderColor: "rgba(16, 185, 129, 0.2)" }}>
+                              {project.primary_username} ({project.primary_masked_secret})
+                            </code>
+                          ) : (
+                            <span style={{ color: "var(--vq-text-muted)", fontSize: "0.8rem" }}>None configured</span>
+                          )}
+                        </span>
+                      </div>
                       <div className="project-card-footer">
                         <button className="button button-primary button-small open-project-button" onClick={() => { setActiveProjectId(project.id); setProjectMessage(""); setProjectError(""); setPage("Overview"); }}>
                           <FolderKanban size={15} /> Open Workspace <span aria-hidden="true">→</span>
@@ -968,10 +1015,15 @@ async function loadTests(projectId?: string) {
             </>
           )}
 
-          {page === "Scenario Builder" && (
+          {page === "Workflow Studio" && (
             <ScenarioBuilder
               projectId={activeProjectId}
               projectName={activeProject?.name || "Current Application"}
+              baseUrl={activeProject?.base_url || ""}
+              projects={projects}
+              onSelectProject={(id: string) => setActiveProjectId(id)}
+              onNavigateToCredentials={() => setPage("Credentials")}
+              onNavigateToApplications={() => setPage("Applications")}
               onRunTriggered={(runId) => {
                 setActiveRunId(runId);
                 setRunning(true);
@@ -980,6 +1032,8 @@ async function loadTests(projectId?: string) {
                 setStepResults([]);
                 setPage("Test Runs");
               }}
+              running={running}
+              onStopRun={() => void handleStopCurrentRun()}
             />
           )}
 
@@ -993,22 +1047,31 @@ async function loadTests(projectId?: string) {
           {page === "Overview" && (
             <>
               <PageHeader
-                eyebrow="WORKSPACE OVERVIEW"
-                title="Overview"
-                description="Monitor test runs, track execution status, and inspect test evidence."
+                eyebrow="AUTOMATION PLATFORM"
+                title="Welcome to Veriqon"
+                description="Build, run, and monitor automated workflows across your applications."
                 action={
-                  <button
-                    className="button button-primary"
-                    onClick={() => openPage("Test Suites")}
-                  >
-                    <ListChecks size={17} />
-                    Browse test cases
-                  </button>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button
+                      className="button button-secondary"
+                      onClick={() => openPage("Applications")}
+                    >
+                      <FolderKanban size={16} />
+                      Manage Applications
+                    </button>
+                    <button
+                      className="button button-primary"
+                      onClick={() => openPage("Workflow Studio")}
+                    >
+                      <Play size={16} />
+                      Create Workflow
+                    </button>
+                  </div>
                 }
               />
 
               {testError && (
-                <div className="alert alert-error">
+                <div className="alert alert-error" style={{ marginBottom: 16 }}>
                   <CircleAlert size={18} />
                   <span>{testError}</span>
                 </div>
@@ -1016,215 +1079,208 @@ async function loadTests(projectId?: string) {
 
               <div className="metric-grid">
                 <MetricCard
-                  icon={<ListChecks />}
-                  label="Discovered tests"
-                  value={loadingTests ? "…" : tests.length}
-                  detail="Collected from pytest"
+                  icon={<FolderKanban />}
+                  label="Registered Applications"
+                  value={projectsLoading ? "…" : projects.length}
+                  detail="Configured applications"
                   tone="blue"
                 />
                 <MetricCard
+                  icon={<Layers />}
+                  label="Recent Workflow Runs"
+                  value={allRuns.length}
+                  detail="Across all applications"
+                  tone="purple"
+                />
+                <MetricCard
                   icon={<CheckCircle2 />}
-                  label="Passed"
-                  value={passed ?? "—"}
-                  detail="Latest run"
+                  label="Successful Runs"
+                  value={allRuns.filter((r) => r.status?.toLowerCase() === "passed" || r.status?.toLowerCase() === "success").length}
+                  detail="Passed workflows"
                   tone="green"
                 />
                 <MetricCard
                   icon={<XCircle />}
-                  label="Failed"
-                  value={failed ?? "—"}
-                  detail="Latest run"
+                  label="Failed Runs"
+                  value={allRuns.filter((r) => r.status?.toLowerCase() === "failed" || r.status?.toLowerCase() === "error").length}
+                  detail="Needs attention"
                   tone="red"
                 />
-                <MetricCard
-                  icon={<Clock3 />}
-                  label="Execution time"
-                  value={activeRunId ? duration : "—"}
-                  detail={running ? "Run in progress" : "Latest run timer"}
-                  tone="purple"
-                />
               </div>
 
-              <div className="dashboard-grid">
-                <section className="card quick-run-card">
-                  <CardHeading
-                    icon={<Play />}
-                    title="Quick execution"
-                    description="Choose your test cases and launch a run."
-                  />
+              <div className="overview-quick-grid">
+                <button
+                  type="button"
+                  className="overview-quick-card"
+                  onClick={() => {
+                    openPage("Applications");
+                    startAddProject();
+                  }}
+                >
+                  <div className="overview-quick-icon">
+                    <FolderKanban size={20} />
+                  </div>
+                  <div className="overview-quick-copy">
+                    <strong>Register Application</strong>
+                    <span>Add web app URL & credentials</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="overview-quick-card"
+                  onClick={() => openPage("Workflow Studio")}
+                >
+                  <div className="overview-quick-icon">
+                    <Play size={20} />
+                  </div>
+                  <div className="overview-quick-copy">
+                    <strong>Build Workflow</strong>
+                    <span>Create reusable browser actions</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="overview-quick-card"
+                  onClick={() => openPage("Test Runs")}
+                >
+                  <div className="overview-quick-icon">
+                    <Activity size={20} />
+                  </div>
+                  <div className="overview-quick-copy">
+                    <strong>View Recent Runs</strong>
+                    <span>Monitor live execution & results</span>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="overview-quick-card"
+                  onClick={() => openPage("Screenshots & Recordings")}
+                >
+                  <div className="overview-quick-icon">
+                    <Camera size={20} />
+                  </div>
+                  <div className="overview-quick-copy">
+                    <strong>View Evidence</strong>
+                    <span>Inspect screenshots & videos</span>
+                  </div>
+                </button>
+              </div>
 
-                  <div className="quick-run-fields">
-                    <label className="field">
-                      <span>Test suite</span>
-                      <select
-                        value={suite}
-                        onChange={(event) => setSuite(event.target.value)}
-                      >
-                        {categories.map((category) => (
-                          <option key={category}>{category}</option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="selection-summary">
-                      <div className="selection-number">{selected.length}</div>
-                      <div>
-                        <strong>Tests selected</strong>
-                        <span>of {tests.length} discovered tests</span>
-                      </div>
-                    </div>
-
-                    <div className="settings-inline">
-                      <label className="toggle-line">
-                        <input
-                          type="checkbox"
-                          checked={headless}
-                          onChange={(event) => setHeadless(event.target.checked)}
-                        />
-                        Headless mode
-                      </label>
-                      <label className="toggle-line">
-                        <input
-                          type="checkbox"
-                          checked={capture}
-                          onChange={(event) => setCapture(event.target.checked)}
-                        />
-                        Capture screenshots
-                      </label>
-                    </div>
-
-                    <button
-                      className="button button-primary button-wide"
-                      disabled={
-                        running ||
-                        !selected.length ||
-                        loadingTests ||
-                        backendStatus !== "Connected"
-                      }
-                      onClick={() => void runTests()}
-                    >
-                      {running ? (
-                        <LoaderCircle className="spin" size={17} />
-                      ) : (
-                        <Play size={17} fill="currentColor" />
-                      )}
-                      {running ? "Tests running…" : "Run selected tests"}
-                    </button>
-                    <p className="muted-text">
-                      Run status: <strong>{runStatus}</strong>
+              <section className="overview-table-card">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div>
+                    <h2 style={{ fontSize: "1.05rem", fontWeight: 700, margin: 0, color: "var(--v-text)" }}>Recent Executions</h2>
+                    <p style={{ fontSize: "0.82rem", color: "var(--v-text-secondary)", margin: "4px 0 0 0" }}>
+                      Latest automated browser runs and their real-time execution status.
                     </p>
                   </div>
-                </section>
+                  <button
+                    className="button button-secondary button-small"
+                    onClick={() => openPage("Test Runs")}
+                  >
+                    View all runs →
+                  </button>
+                </div>
 
-                <section className="card latest-run-card">
-                  <CardHeading
-                    icon={<Activity />}
-                    title="Latest execution"
-                    description="Current or most recent run."
-                    action={
+                {allRuns.length === 0 ? (
+                  <div style={{ padding: "48px 24px", textAlign: "center" }}>
+                    <p style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--v-text)", marginBottom: 6 }}>
+                      {projects.length === 0 ? "No applications registered yet" : "No workflow runs executed yet"}
+                    </p>
+                    <p style={{ fontSize: "0.82rem", color: "var(--v-text-muted)", maxWidth: 440, margin: "0 auto 18px" }}>
+                      {projects.length === 0
+                        ? "Register your target web application with its URL and credentials to begin building automated scenarios."
+                        : "Choose your registered application in Workflow Studio and execute your first workflow to see results here."}
+                    </p>
+                    {projects.length === 0 ? (
                       <button
-                        className="text-button"
-                        onClick={() => openPage("Test Runs")}
+                        className="button button-primary"
+                        onClick={() => {
+                          openPage("Applications");
+                          startAddProject();
+                        }}
                       >
-                        View details
+                        <FolderKanban size={16} />
+                        Register Application
                       </button>
-                    }
-                  />
-
-                  {activeRunId ? (
-                    <div className="latest-run-content">
-                      <div className="run-status-row">
-                        <span className="run-id-label">RUN ID</span>
-                        <StatusPill status={runStatus} />
-                      </div>
-                      <code className="run-id">{activeRunId}</code>
-
-                      <div className="progress-label">
-                        <span>{running ? "Executing tests" : "Run progress"}</span>
-                        <span>{progress}%</span>
-                      </div>
-                      <div className="progress-track">
-                        <div
-                          className="progress-fill"
-                          style={{ width: `${progress}%` }}
-                        />
-                      </div>
-
-                      <div className="run-stat-grid">
-                        <SmallStat label="Passed" value={passed ?? "—"} />
-                        <SmallStat label="Failed" value={failed ?? "—"} />
-                        <SmallStat label="Skipped" value={skipped ?? "—"} />
-                      </div>
-                    </div>
-                  ) : (
-                    <EmptyState
-                      icon={<Gauge />}
-                      title="Ready for your first run"
-                      description="Select test cases and start execution to see live results here."
-                    />
-                  )}
-                </section>
-
-                <section className="card suite-overview-card">
-                  <CardHeading
-                    icon={<Archive />}
-                    title="Test suite overview"
-                    description="Tests grouped by their source module."
-                    action={
+                    ) : (
                       <button
-                        className="text-button"
-                        onClick={() => openPage("Test Suites")}
+                        className="button button-primary"
+                        onClick={() => openPage("Workflow Studio")}
                       >
-                        View suites
+                        <Play size={16} />
+                        Create Workflow
                       </button>
-                    }
-                  />
-
-                  <div className="suite-list">
-                    {categories
-                      .filter((category) => category !== "All Test Suites")
-                      .map((category) => {
-                        const count = tests.filter(
-                          (test) => test.category === category,
-                        ).length;
-
-                        return (
-                          <button
-                            className="suite-row"
-                            key={category}
-                            onClick={() => {
-                              setSuite(category);
-                              openPage("Test Suites");
-                            }}
-                          >
-                            <span className="suite-icon">
-                              <FlaskConical size={17} />
-                            </span>
-                            <span className="suite-name">{category}</span>
-                            <span className="suite-count">{count} tests</span>
-                          </button>
-                        );
-                      })}
+                    )}
                   </div>
-                </section>
+                ) : (
+                  <div className="overview-table-wrap">
+                    <table className="overview-table">
+                      <thead>
+                        <tr>
+                          <th>Workflow / Run Name</th>
+                          <th>Application</th>
+                          <th>Status</th>
+                          <th>Started At</th>
+                          <th>Duration</th>
+                          <th style={{ textAlign: "right" }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allRuns.slice(0, 8).map((run) => {
+                          const runName =
+                            run.test_file ||
+                            (run.test_ids && run.test_ids.length > 0 ? run.test_ids.join(", ") : null) ||
+                            `Run #${(run.id || run.run_id || "").slice(0, 8)}`;
+                          const app = projects.find((p) => p.id === run.project_id);
+                          const appName = app ? app.name : run.project_id || "Global";
+                          const runDuration = run.summary?.duration
+                            ? `${run.summary.duration.toFixed(1)}s`
+                            : "—";
 
-                <section className="card log-preview-card">
-                  <CardHeading
-                    icon={<SquareTerminal />}
-                    title="Recent console output"
-                    description="Latest messages from the automation workspace."
-                    action={
-                      <button
-                        className="text-button"
-                        onClick={() => openPage("Test Runs")}
-                      >
-                        View logs
-                      </button>
-                    }
-                  />
-                  <LogViewer logs={logs.slice(-8)} compact />
-                </section>
-              </div>
+                          return (
+                            <tr key={run.id || run.run_id}>
+                              <td>
+                                <span style={{ fontWeight: 600, color: "var(--v-text)" }}>{runName}</span>
+                                <div style={{ fontSize: "0.72rem", color: "var(--v-text-muted)", fontFamily: "monospace" }}>
+                                  ID: {(run.id || run.run_id || "").slice(0, 8)}
+                                </div>
+                              </td>
+                              <td>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: "0.8rem", fontWeight: 500 }}>
+                                  <FolderKanban size={13} style={{ color: "var(--v-accent)" }} />
+                                  {appName}
+                                </span>
+                              </td>
+                              <td>
+                                <StatusPill status={run.status} />
+                              </td>
+                              <td style={{ fontSize: "0.78rem", color: "var(--v-text-secondary)" }}>
+                                {formatTimestamp(run.started_at || run.created_at)}
+                              </td>
+                              <td style={{ fontSize: "0.78rem", color: "var(--v-text-secondary)", fontFamily: "monospace" }}>
+                                {runDuration}
+                              </td>
+                              <td style={{ textAlign: "right" }}>
+                                <button
+                                  className="button button-secondary button-small"
+                                  style={{ fontSize: "0.75rem", padding: "4px 10px" }}
+                                  onClick={() => {
+                                    setActiveRunId(run.id || run.run_id);
+                                    openPage("Test Runs");
+                                  }}
+                                >
+                                  View Details
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
             </>
           )}
 
@@ -1485,22 +1541,42 @@ async function loadTests(projectId?: string) {
                       <div className="selection-number">{selected.length}</div>
                       <div>
                         <strong>Tests selected</strong>
-                        <span>Choose tests from Test Suites.</span>
+                        <span>Select tests or run from Workflow Studio.</span>
                       </div>
                     </div>
 
-                    <button
-                      className="button button-primary button-wide"
-                      disabled={
-                        running ||
-                        !selected.length ||
-                        backendStatus !== "Connected"
-                      }
-                      onClick={() => void runTests()}
-                    >
-                      <Play size={17} />
-                      {running ? "Running…" : "Start execution"}
-                    </button>
+                    {running ? (
+                      <button
+                        type="button"
+                        className="button button-danger button-wide"
+                        onClick={() => void handleStopCurrentRun()}
+                        style={{
+                          background: "#dc2626",
+                          borderColor: "#b91c1c",
+                          color: "#ffffff",
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <Square size={16} fill="currentColor" />
+                        Stop / Terminate Execution
+                      </button>
+                    ) : (
+                      <button
+                        className="button button-primary button-wide"
+                        disabled={
+                          !selected.length ||
+                          backendStatus !== "Connected"
+                        }
+                        onClick={() => void runTests()}
+                      >
+                        <Play size={17} />
+                        Start execution
+                      </button>
+                    )}
 
                     <p className="muted-text">
                       Note: browser, environment, headless, and screenshot
@@ -1561,6 +1637,7 @@ async function loadTests(projectId?: string) {
                   runSummary={runSummary}
                   videoArtifact={artifacts.find((a) => a.artifact_type === "video" && a.run_id === activeRunId)}
                   onPreviewImage={(item) => setPreviewImage(item)}
+                  onStopRun={() => void handleStopCurrentRun()}
                 />
               )}
 
@@ -1800,9 +1877,9 @@ async function loadTests(projectId?: string) {
                         Enable video recording
                       </button>
                     )}
-                    <button className="button button-secondary" onClick={() => openPage("Test Suites")}>
+                    <button className="button button-secondary" onClick={() => openPage("Workflow Studio")}>
                       <Play size={15} />
-                      Run tests now
+                      Create workflow
                     </button>
                   </div>
                 </section>

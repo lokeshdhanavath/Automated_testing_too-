@@ -12,10 +12,18 @@ from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
 
+# Ensure backend directory and project root are always on sys.path
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = BACKEND_DIR.parent.parent
+for p in (BACKEND_DIR, ROOT_DIR):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.database import SessionLocal
 from app import db_service, credentials_service
@@ -23,6 +31,7 @@ from app.csv_scenarios import router as csv_scenarios_router
 from app.projects_api import router as projects_router
 from app.scripts_api import router as scripts_router
 from app.scenarios_api import router as scenarios_router
+from app.inspector_api import router as inspector_router
 
 
 # ---------------------------------------------------------
@@ -55,7 +64,10 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,6 +77,7 @@ app.include_router(scripts_router)
 app.include_router(csv_scenarios_router)
 app.include_router(projects_router)
 app.include_router(scenarios_router)
+app.include_router(inspector_router)
 
 lock = Lock()
 runs: dict[str, dict[str, Any]] = {}
@@ -300,26 +313,24 @@ def execute_run(run_id: str, project_data: dict[str, Any], request_data: dict[st
         if db_username:
             env["VERIQON_USERNAME"] = db_username
             env["VERIQON_PASSWORD"] = db_password or ""
-            env["APEX_USERNAME"] = db_username
-            env["APEX_PASSWORD"] = db_password or ""
         else:
-            # Safely bind project credentials from configured environment variable names
+            # Safely check if custom environment variables were specified
             user_env = project_data.get("username_env_var")
             pass_env = project_data.get("password_env_var")
             if user_env and os.getenv(user_env):
                 env["VERIQON_USERNAME"] = os.getenv(user_env, "")
-                env["APEX_USERNAME"] = os.getenv(user_env, "")
+            else:
+                env["VERIQON_USERNAME"] = ""
+
             if pass_env and os.getenv(pass_env):
                 env["VERIQON_PASSWORD"] = os.getenv(pass_env, "")
-                env["APEX_PASSWORD"] = os.getenv(pass_env, "")
-
-            # If project is NOT apex-timesheet and no custom credential was resolved,
-            # purge the inherited APEX credentials so other applications NEVER use APEX credentials!
-            if project_ext_id != "apex-timesheet" and not env.get("VERIQON_USERNAME"):
-                env.pop("APEX_USERNAME", None)
-                env.pop("APEX_PASSWORD", None)
-                env["VERIQON_USERNAME"] = ""
+            else:
                 env["VERIQON_PASSWORD"] = ""
+
+        # Ensure no legacy APEX environment variables leak into any test execution
+        env.pop("APEX_USERNAME", None)
+        env.pop("APEX_PASSWORD", None)
+        env.pop("APEX_BASE_URL", None)
 
         process = subprocess.Popen(
             command,
@@ -336,6 +347,7 @@ def execute_run(run_id: str, project_data: dict[str, Any], request_data: dict[st
         with lock:
             if run_id in runs:
                 runs[run_id]["pid"] = process.pid
+                runs[run_id]["process"] = process
 
         output_lines = []
         if process.stdout is not None:
@@ -652,9 +664,10 @@ def get_run(run_id: str):
         run_data = db_service.get_run_details(db, run_id)
         with lock:
             mem = runs.get(run_id)
-            if mem and mem.get("status") in ("queued", "running"):
+            if mem and mem.get("status") in ("queued", "running") and run_data.get("status") in ("queued", "running", "pending"):
                 run_data["status"] = mem["status"]
-                run_data["logs"] = mem.get("logs", "")
+            if mem and mem.get("logs"):
+                run_data["logs"] = mem["logs"]
         return run_data
     except HTTPException:
         # Fallback to in-memory if DB record is not yet committed
@@ -686,6 +699,71 @@ def get_logs(run_id: str):
         return {"logs": ""}
     finally:
         db.close()
+
+
+@app.post("/api/runs/{run_id}/stop")
+@app.post("/api/runs/stop")
+def stop_run(run_id: str | None = None):
+    """
+    Terminates an ongoing test run or dynamic browser scenario execution immediately.
+    """
+    global active_run_id
+    target_id = run_id or active_run_id
+    if not target_id:
+        return {"status": "ok", "message": "No active test run to terminate."}
+
+    # 1. Stop dynamic Playwright session if present
+    try:
+        from app import scenario_engine
+        scenario_engine.cancel_scenario_run(target_id)
+    except Exception:
+        pass
+
+    # 2. Terminate subprocess if pytest run
+    with lock:
+        mem = runs.get(target_id)
+        if mem:
+            proc = mem.get("process")
+            if proc:
+                try:
+                    proc.terminate()
+                    proc.kill()
+                except Exception:
+                    pass
+            pid = mem.get("pid")
+            if pid:
+                try:
+                    import psutil
+                    p = psutil.Process(pid)
+                    for child in p.children(recursive=True):
+                        child.kill()
+                    p.kill()
+                except Exception:
+                    pass
+            mem["status"] = "cancelled"
+            mem["logs"] += "\n[STOPPED] Execution terminated by user request.\n"
+
+        if active_run_id == target_id:
+            active_run_id = None
+
+    # 3. Update database record
+    db = SessionLocal()
+    try:
+        r_uuid = uuid.UUID(target_id)
+        db_service.update_test_run(
+            db,
+            r_uuid,
+            status="cancelled",
+            finished_at=datetime.now(timezone.utc),
+            exit_code=130,
+            summary={"error": "Run terminated by user"},
+        )
+    except Exception:
+        pass
+    finally:
+        db.close()
+
+    return {"status": "cancelled", "run_id": target_id, "message": "Run terminated successfully."}
 
 
 # ---------------------------------------------------------

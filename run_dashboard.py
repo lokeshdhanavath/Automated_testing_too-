@@ -46,7 +46,23 @@ def main():
     frontend_cmd = [npm_cmd, "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173"]
     frontend_proc = subprocess.Popen(frontend_cmd, cwd=FRONTEND_DIR)
 
-    time.sleep(2)
+    # Wait for FastAPI backend to be fully listening before opening the browser
+    print("Waiting for FastAPI backend to be ready...")
+    import urllib.request
+    backend_ready = False
+    for attempt in range(20):
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:8000/api/health", timeout=1) as resp:
+                if resp.status == 200:
+                    backend_ready = True
+                    print("Backend is ready and connected!")
+                    break
+        except Exception:
+            time.sleep(0.5)
+
+    if not backend_ready:
+        print("Warning: Backend is taking longer than usual to report healthy.")
+
     print("\n" + "=" * 60)
     print(" Veriqon Platform is running!")
     print(" Frontend: http://127.0.0.1:5173")

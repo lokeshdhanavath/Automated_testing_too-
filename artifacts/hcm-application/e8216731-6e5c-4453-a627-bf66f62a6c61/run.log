@@ -1,0 +1,12 @@
+[2026-10-23 07:09:35 UTC] Starting execution for: 'HCM Quick Verification' (Run ID: e8216731-6e5c-4453-a627-bf66f62a6c61)
+[2026-10-23 07:09:35 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-23 07:09:35 UTC] Browser: chromium (Headless: True)
+[2026-10-23 07:09:37 UTC] [RUNNING] Step 1: Open HCM Base URL (action: open_app)
+[2026-10-23 07:09:37 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-23 07:09:43 UTC] [PASSED] Step 1 finished in 5714ms
+[2026-10-23 07:09:43 UTC] [RUNNING] Step 2: Pause for HCM redirect to settle (action: wait_for_element)
+[2026-10-23 07:09:43 UTC] Pausing execution for 2000ms...
+[2026-10-23 07:09:45 UTC] [PASSED] Step 2 finished in 2015ms
+[2026-10-23 07:09:46 UTC] Video saved and registered: recording.webm
+[2026-10-23 07:09:46 UTC] Workflow execution completed with status: PASSED
+[2026-10-23 07:09:46 UTC] Summary: 2/2 passed, 0 failed, 0 skipped.

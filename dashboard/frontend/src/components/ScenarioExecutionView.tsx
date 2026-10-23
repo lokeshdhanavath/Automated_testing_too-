@@ -7,6 +7,7 @@ import {
   AlertCircle,
   Maximize2,
   Film,
+  Square,
 } from "lucide-react";
 import type { StepExecutionResult, ArtifactItem } from "../services/api";
 
@@ -17,12 +18,14 @@ interface ScenarioExecutionViewProps {
   runSummary?: { total?: number; passed?: number; failed?: number; skipped?: number } | null;
   videoArtifact?: ArtifactItem | null;
   onPreviewImage?: (item: ArtifactItem) => void;
+  onStopRun?: () => void;
 }
 
 export const ScenarioExecutionView: React.FC<ScenarioExecutionViewProps> = ({
   stepResults,
   status,
   videoArtifact,
+  onStopRun,
 }) => {
   const [modalImage, setModalImage] = useState<string | null>(null);
 
@@ -44,6 +47,27 @@ export const ScenarioExecutionView: React.FC<ScenarioExecutionViewProps> = ({
           </div>
 
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            {(status.toLowerCase() === "running" || status.toLowerCase() === "queued") && onStopRun && (
+              <button
+                type="button"
+                onClick={onStopRun}
+                className="button button-danger button-small"
+                style={{
+                  background: "#dc2626",
+                  borderColor: "#b91c1c",
+                  color: "#ffffff",
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: "0.78rem",
+                  padding: "4px 10px",
+                }}
+              >
+                <Square size={13} fill="currentColor" />
+                Stop Execution
+              </button>
+            )}
             <span
               className="badge"
               style={{

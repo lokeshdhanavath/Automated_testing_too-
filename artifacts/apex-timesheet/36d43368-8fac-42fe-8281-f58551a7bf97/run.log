@@ -1,0 +1,14 @@
+[2026-10-23 09:23:03 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 36d43368-8fac-42fe-8281-f58551a7bf97)
+[2026-10-23 09:23:03 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-23 09:23:03 UTC] Browser: chromium (Headless: True)
+[2026-10-23 09:23:04 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-23 09:23:04 UTC] Opening application at: https://oracleapex.com/ords/r/lokesh354/timesheet-application/
+[2026-10-23 09:23:09 UTC] [PASSED] Step 1 finished in 5086ms
+[2026-10-23 09:23:09 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-23 09:23:09 UTC] Entering username for account 'lokesh' into login form...
+[2026-10-23 09:23:09 UTC] Entering encrypted vault password into password field...
+[2026-10-23 09:23:09 UTC] Submitting login form...
+[2026-10-23 09:23:11 UTC] [PASSED] Step 2 finished in 1685ms
+[2026-10-23 09:23:12 UTC] Video saved and registered: recording.webm
+[2026-10-23 09:23:12 UTC] Workflow execution completed with status: PASSED
+[2026-10-23 09:23:12 UTC] Summary: 2/2 passed, 0 failed, 0 skipped.

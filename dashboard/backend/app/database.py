@@ -1,4 +1,3 @@
-
 import os
 from pathlib import Path
 
@@ -28,6 +27,15 @@ SessionLocal = sessionmaker(
     autoflush=False,
     autocommit=False,
 )
+
+
+def get_db():
+    """FastAPI dependency for database session lifecycle."""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def check_database_connection() -> bool:

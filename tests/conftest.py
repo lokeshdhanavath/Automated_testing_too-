@@ -44,12 +44,22 @@ def browser(playwright_instance):
 
     launch_args = []
     if browser_type_name == "chromium":
-        launch_args.append("--disable-blink-features=AutomationControlled")
+        launch_args.extend([
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+        ])
 
-    browser = browser_type.launch(
-        headless=config.HEADLESS,
-        args=launch_args,
-    )
+    launch_kwargs = {
+        "headless": config.HEADLESS,
+        "args": launch_args,
+    }
+    if browser_type_name == "chromium":
+        try:
+            browser = browser_type.launch(**launch_kwargs, channel="chrome")
+        except Exception:
+            browser = browser_type.launch(**launch_kwargs)
+    else:
+        browser = browser_type.launch(**launch_kwargs)
     yield browser
     browser.close()
 

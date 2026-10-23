@@ -3,6 +3,7 @@ export const API_BASE_URL = "http://127.0.0.1:8000";
 async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
+  retries: number = 2,
 ): Promise<T> {
   const isFormData =
     typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -13,10 +14,30 @@ async function apiRequest<T>(
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers,
+      signal: options.signal || controller.signal,
+    });
+  } catch (fetchErr: any) {
+    if (fetchErr.name === "AbortError") {
+      throw new Error("Request timed out. Please check if the backend service is running.");
+    }
+    // If backend is still starting up and request is a safe idempotent GET, retry after a short pause
+    const method = (options.method || "GET").toUpperCase();
+    if (method === "GET" && retries > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      return apiRequest<T>(path, options, retries - 1);
+    }
+    throw fetchErr;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   const raw = await response.text();
   let data: unknown = null;
@@ -73,8 +94,13 @@ export interface ProjectConfig {
   headless: boolean;
   capture_screenshots: boolean;
   capture_video: boolean;
-  username_env_var: string;
-  password_env_var: string;
+  username_env_var?: string;
+  password_env_var?: string;
+  initial_username?: string;
+  initial_password?: string;
+  primary_username?: string;
+  primary_masked_secret?: string;
+  has_credentials?: boolean;
   description?: string;
   test_timeout_seconds?: number;
   navigation_timeout_seconds?: number;
@@ -91,6 +117,8 @@ export type ProjectPayload = Omit<
   "id" | "is_default" | "created_at" | "updated_at"
 > & {
   is_active?: boolean;
+  initial_username?: string;
+  initial_password?: string;
 };
 
 export async function getProjects(): Promise<ProjectConfig[]> {
@@ -312,6 +340,11 @@ export async function getRuns(projectId?: string): Promise<RunRecord[]> {
 
 export async function getProjectRuns(projectId: string): Promise<RunRecord[]> {
   return apiRequest<RunRecord[]>(`/api/projects/${encodeURIComponent(projectId)}/runs`);
+}
+
+export async function stopRun(runId?: string): Promise<{ status: string; message: string }> {
+  const path = runId ? `/api/runs/${encodeURIComponent(runId)}/stop` : "/api/runs/stop";
+  return apiRequest<{ status: string; message: string }>(path, { method: "POST" });
 }
 
 // ---------------------------------------------------------
@@ -651,4 +684,107 @@ export async function deleteProjectDataProfile(profileId: string): Promise<{ mes
 export async function getRunStepResults(runId: string): Promise<StepExecutionResult[]> {
   return apiRequest<StepExecutionResult[]>(`/api/runs/${runId}/steps`);
 }
+
+export interface DynamicWorkflowPayload {
+  name: string;
+  description?: string;
+  environment?: string;
+  credential_id?: string | null;
+  failure_policy?: "stop" | "continue";
+  timeout_seconds?: number;
+  steps: ScenarioStep[];
+  save_as_scenario?: boolean;
+}
+
+export async function runDynamicWorkflow(
+  projectId: string,
+  payload: DynamicWorkflowPayload,
+): Promise<{ run_id: string; project_id: string; scenario_id?: string | null; status: string }> {
+  return apiRequest<{ run_id: string; project_id: string; scenario_id?: string | null; status: string }>(
+    `/api/projects/${projectId}/workflows/run`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+// ============================================================================
+// Element Inspector API
+// ============================================================================
+
+export interface InspectElement {
+  id: string;
+  category: "button" | "link" | "input" | "select" | "checkbox" | "other";
+  tag: string;
+  role: string;
+  type: string;
+  text: string;
+  label: string;
+  placeholder: string;
+  element_id: string;
+  name_attr: string;
+  friendly_name: string;
+  locator_strategy: string;
+  locator_value: string;
+  is_ambiguous: boolean;
+  options: { value: string; label: string }[];
+  rect: { x: number; y: number; width: number; height: number };
+}
+
+export interface InspectResponse {
+  project_id: string;
+  project_name: string;
+  page_url: string;
+  page_title: string;
+  screenshot: string;
+  viewport: { width: number; height: number };
+  elements: InspectElement[];
+  categories_count: {
+    buttons: number;
+    links: number;
+    inputs: number;
+    selects: number;
+    total: number;
+  };
+  authenticated: boolean;
+}
+
+export async function inspectApplicationPage(
+  projectId: string,
+  options: {
+    path?: string;
+    with_login?: boolean;
+    expand_navigation?: boolean;
+    force_refresh?: boolean;
+  } = {},
+): Promise<InspectResponse> {
+  return apiRequest<InspectResponse>(`/api/inspector/${encodeURIComponent(projectId)}/inspect`, {
+    method: "POST",
+    body: JSON.stringify(options),
+  });
+}
+
+export async function interactWithInspector(
+  projectId: string,
+  payload: {
+    action: "click" | "navigate" | "login" | "expand_nav";
+    target?: string;
+    locator_type?: string;
+    value?: string;
+  },
+): Promise<InspectResponse> {
+  return apiRequest<InspectResponse>(`/api/inspector/${encodeURIComponent(projectId)}/interact`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function closeInspectorSession(projectId: string): Promise<{ status: string }> {
+  return apiRequest<{ status: string }>(`/api/inspector/${encodeURIComponent(projectId)}/close`, {
+    method: "POST",
+  });
+}
+
+
 

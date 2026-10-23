@@ -70,7 +70,7 @@ def _now() -> datetime:
 
 def create_credential(
     db: Session,
-    project_id: uuid.UUID,
+    project_id: uuid.UUID | str,
     name: str,
     username: str,
     secret: str,
@@ -79,6 +79,7 @@ def create_credential(
     credential_type: str = "username_password",
 ) -> dict[str, Any]:
     """Store an encrypted credential record in PostgreSQL."""
+    pid = project_id if isinstance(project_id, uuid.UUID) else uuid.UUID(str(project_id))
     name = name.strip()
     username = username.strip()
     if not name:
@@ -91,7 +92,7 @@ def create_credential(
     # Check for existing with same name in project
     existing = db.execute(
         text("SELECT id FROM app_credentials WHERE project_id = :pid AND name = :name"),
-        {"pid": project_id, "name": name},
+        {"pid": pid, "name": name},
     ).scalar()
     if existing:
         raise HTTPException(status_code=409, detail=f"A credential named '{name}' already exists for this application.")
@@ -116,7 +117,7 @@ def create_credential(
         """),
         {
             "id": cred_id,
-            "project_id": project_id,
+            "project_id": pid,
             "name": name,
             "credential_type": credential_type,
             "username": username,
@@ -132,7 +133,7 @@ def create_credential(
 
     return {
         "id": str(cred_id),
-        "project_id": str(project_id),
+        "project_id": str(pid),
         "name": name,
         "credential_type": credential_type,
         "username": username,
@@ -144,8 +145,9 @@ def create_credential(
     }
 
 
-def list_credentials(db: Session, project_id: uuid.UUID) -> list[dict[str, Any]]:
+def list_credentials(db: Session, project_id: uuid.UUID | str) -> list[dict[str, Any]]:
     """Return all credentials for a project with masked secrets (never plaintext)."""
+    pid = project_id if isinstance(project_id, uuid.UUID) else uuid.UUID(str(project_id))
     rows = db.execute(
         text("""
             SELECT id, project_id, name, credential_type, username,
@@ -154,7 +156,7 @@ def list_credentials(db: Session, project_id: uuid.UUID) -> list[dict[str, Any]]
             WHERE project_id = :pid
             ORDER BY created_at ASC
         """),
-        {"pid": project_id},
+        {"pid": pid},
     ).mappings().all()
 
     results = []
