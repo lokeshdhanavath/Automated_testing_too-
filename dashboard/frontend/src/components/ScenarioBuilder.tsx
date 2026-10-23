@@ -30,6 +30,8 @@ import {
   AlertCircle,
   Square,
   MousePointer,
+  FileSpreadsheet,
+  Upload,
 } from "lucide-react";
 import {
   getProjectScenarios,
@@ -178,6 +180,113 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     is_enabled: true,
   });
   const [showAdvancedLocators, setShowAdvancedLocators] = useState(false);
+
+  // Tab: "steps" vs "csv"
+  const [builderTab, setBuilderTab] = useState<"steps" | "csv">("steps");
+
+  // CSV Data inputs state
+  const [csvColumns, setCsvColumns] = useState<string[]>(["Hours", "Task_Name", "Project", "Comments"]);
+  const [csvRows, setCsvRows] = useState<Record<string, string>[]>([
+    { Hours: "8.0", Task_Name: "Frontend Development", Project: "Timesheet App", Comments: "Dynamic action tests" },
+    { Hours: "7.5", Task_Name: "Backend Automation", Project: "Veriqon Core", Comments: "Fast Playwright execution" },
+    { Hours: "6.0", Task_Name: "Documentation & Release", Project: "Platform", Comments: "End-to-end verification" },
+  ]);
+  const [activeRowIndex, setActiveRowIndex] = useState<number>(0);
+  const [copiedVarName, setCopiedVarName] = useState<string | null>(null);
+
+  function handleCsvFileUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) return;
+      parseAndSetCsv(text);
+    };
+    reader.readAsText(file);
+  }
+
+  function parseAndSetCsv(csvText: string) {
+    const lines = csvText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 2) {
+      alert("CSV file must have at least a header line and one data row.");
+      return;
+    }
+
+    const headers = lines[0].split(",").map((h) => h.replace(/^["']|["']$/g, "").trim());
+    const rows: Record<string, string>[] = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const values = lines[i].split(",").map((v) => v.replace(/^["']|["']$/g, "").trim());
+      const rowObj: Record<string, string> = {};
+      headers.forEach((h, idx) => {
+        rowObj[h] = values[idx] || "";
+      });
+      rows.push(rowObj);
+    }
+
+    setCsvColumns(headers);
+    setCsvRows(rows);
+    setActiveRowIndex(0);
+    setStatusMessage({
+      type: "success",
+      text: `Loaded CSV with ${rows.length} rows and ${headers.length} columns (${headers.join(", ")}).`,
+    });
+  }
+
+  function handleLoadSampleCsv() {
+    setCsvColumns(["Hours", "Task_Name", "Project", "Comments", "Date"]);
+    setCsvRows([
+      { Hours: "8.0", Task_Name: "Frontend Development", Project: "Timesheet App", Comments: "Dynamic action tests", Date: "2026-10-23" },
+      { Hours: "7.5", Task_Name: "Backend Automation", Project: "Veriqon Core", Comments: "Fast Playwright execution", Date: "2026-10-24" },
+      { Hours: "6.0", Task_Name: "Documentation & Release", Project: "Platform", Comments: "End-to-end verification", Date: "2026-10-25" },
+    ]);
+    setActiveRowIndex(0);
+    setStatusMessage({ type: "success", text: "Loaded sample Timesheet CSV dataset (3 rows, 5 columns)." });
+  }
+
+  function handleAddCsvRow() {
+    const newRow: Record<string, string> = {};
+    csvColumns.forEach((c) => {
+      newRow[c] = "";
+    });
+    setCsvRows([...csvRows, newRow]);
+  }
+
+  function handleRemoveCsvRow(idx: number) {
+    const updated = csvRows.filter((_, i) => i !== idx);
+    setCsvRows(updated);
+    if (activeRowIndex >= updated.length) {
+      setActiveRowIndex(Math.max(0, updated.length - 1));
+    }
+  }
+
+  function handleCsvCellChange(rowIdx: number, colName: string, val: string) {
+    const updated = [...csvRows];
+    updated[rowIdx] = { ...updated[rowIdx], [colName]: val };
+    setCsvRows(updated);
+  }
+
+  function handleAddCsvColumn() {
+    const colName = prompt("Enter new column name (e.g. Employee_ID, Status):");
+    if (!colName || !colName.trim()) return;
+    const cleanCol = colName.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
+    if (csvColumns.includes(cleanCol)) {
+      alert("Column already exists.");
+      return;
+    }
+    setCsvColumns([...csvColumns, cleanCol]);
+    setCsvRows(csvRows.map((r) => ({ ...r, [cleanCol]: "" })));
+  }
+
+  function handleClearCsv() {
+    if (window.confirm("Are you sure you want to clear all CSV data?")) {
+      setCsvColumns([]);
+      setCsvRows([]);
+      setActiveRowIndex(0);
+    }
+  }
 
   // Element Picker states
   const [elementPickerOpen, setElementPickerOpen] = useState(false);
@@ -490,11 +599,14 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     setStatusMessage(null);
 
     try {
+      const activeDataRow = csvRows.length > 0 ? (csvRows[activeRowIndex] || csvRows[0]) : undefined;
       const response = await runDynamicWorkflow(projectId, {
         name: workflowName || "Dynamic Browser Workflow",
         steps: workflowSteps,
         failure_policy: "stop",
         timeout_seconds: 120,
+        dataset_row: activeDataRow,
+        dataset_rows: csvRows.length > 0 ? csvRows : undefined,
       });
 
       setStatusMessage({ type: "success", text: `Workflow execution started! Run ID: ${response.run_id}` });
@@ -750,8 +862,105 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
       )}
 
       {/* =========================================================================
-          2. AVAILABLE ACTIONS (Responsive 4-column Grid)
+          MODE SWITCHER: WORKFLOW STEPS vs CSV DATA INPUTS
       ========================================================================= */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--v-border)", paddingBottom: 12, flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", gap: 6, background: "var(--v-surface-2)", padding: 4, borderRadius: 8, border: "1px solid var(--v-border)" }}>
+          <button
+            type="button"
+            onClick={() => setBuilderTab("steps")}
+            style={{
+              padding: "7px 16px",
+              borderRadius: 6,
+              border: "none",
+              fontSize: "0.82rem",
+              fontWeight: builderTab === "steps" ? 700 : 500,
+              background: builderTab === "steps" ? "var(--v-surface)" : "transparent",
+              color: builderTab === "steps" ? "var(--v-accent)" : "var(--v-text-secondary)",
+              boxShadow: builderTab === "steps" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 7,
+              transition: "all 0.15s ease",
+            }}
+          >
+            <Layers size={15} />
+            <span>Workflow Steps ({workflowSteps.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setBuilderTab("csv")}
+            style={{
+              padding: "7px 16px",
+              borderRadius: 6,
+              border: "none",
+              fontSize: "0.82rem",
+              fontWeight: builderTab === "csv" ? 700 : 500,
+              background: builderTab === "csv" ? "var(--v-surface)" : "transparent",
+              color: builderTab === "csv" ? "var(--v-accent)" : "var(--v-text-secondary)",
+              boxShadow: builderTab === "csv" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 7,
+              transition: "all 0.15s ease",
+            }}
+          >
+            <FileSpreadsheet size={15} />
+            <span>CSV Data Inputs</span>
+            {csvRows.length > 0 && (
+              <span
+                style={{
+                  fontSize: "0.68rem",
+                  padding: "1px 6px",
+                  borderRadius: 10,
+                  background: "var(--v-accent-light)",
+                  color: "var(--v-accent)",
+                  fontWeight: 700,
+                }}
+              >
+                {csvRows.length} rows
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Dynamic Data active row selector */}
+        {csvRows.length > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: "0.78rem", color: "var(--v-text-secondary)", fontWeight: 600 }}>
+              Active CSV Row for Run:
+            </span>
+            <select
+              value={activeRowIndex}
+              onChange={(e) => setActiveRowIndex(parseInt(e.target.value) || 0)}
+              style={{
+                fontSize: "0.78rem",
+                padding: "5px 10px",
+                borderRadius: 6,
+                border: "1px solid var(--v-border)",
+                background: "var(--v-surface)",
+                color: "var(--v-text)",
+                fontWeight: 600,
+              }}
+            >
+              {csvRows.map((row, idx) => (
+                <option key={idx} value={idx}>
+                  Row {idx + 1}: {Object.entries(row).slice(0, 2).map(([k, v]) => `${k}=${v}`).join(", ")}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {builderTab === "steps" && (
+        <>
+          {/* =========================================================================
+              2. AVAILABLE ACTIONS (Responsive 4-column Grid)
+          ========================================================================= */}
       <div className="sb-section">
         <div className="sb-section-header">
           <div>
@@ -1050,6 +1259,236 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
           </div>
         )}
       </div>
+      </>
+      )}
+
+      {/* =========================================================================
+          CSV DATA INPUTS PANEL (Interactive Data Table & Parameters)
+      ========================================================================= */}
+      {builderTab === "csv" && (
+        <div className="sb-section" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {/* Header & Controls */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <h2 className="sb-section-title" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <FileSpreadsheet size={20} style={{ color: "var(--v-accent)" }} />
+                CSV Data-Driven Parameters
+              </h2>
+              <p className="sb-section-desc">
+                Provide test input values using CSV columns. In any action step, reference variables using <code>{"{{ColumnName}}"}</code> (e.g. <code>{"{{Hours}}"}</code>).
+              </p>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {/* Hidden file input */}
+              <input
+                id="csv-file-upload"
+                type="file"
+                accept=".csv"
+                style={{ display: "none" }}
+                onChange={handleCsvFileUpload}
+              />
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() => document.getElementById("csv-file-upload")?.click()}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <Upload size={14} />
+                Upload CSV
+              </button>
+
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={handleLoadSampleCsv}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <Sparkles size={14} style={{ color: "var(--v-accent)" }} />
+                Sample Data
+              </button>
+
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={handleAddCsvColumn}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <Plus size={14} />
+                Add Column
+              </button>
+
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={handleAddCsvRow}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              >
+                <Plus size={14} />
+                Add Row
+              </button>
+
+              {csvRows.length > 0 && (
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={handleClearCsv}
+                  title="Clear all CSV data"
+                  style={{ color: "#ef4444" }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Variable Copy Pill Bar */}
+          {csvColumns.length > 0 && (
+            <div style={{ background: "var(--v-surface-2)", borderRadius: 10, padding: 12, border: "1px solid var(--v-border)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--v-text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  Available Action Input Variables (Click to copy)
+                </span>
+                {copiedVarName && (
+                  <span style={{ fontSize: "0.74rem", color: "var(--v-success)", fontWeight: 600 }}>
+                    Copied {`{{${copiedVarName}}}`} to clipboard!
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {csvColumns.map((col) => (
+                  <button
+                    key={col}
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`{{${col}}}`);
+                      setCopiedVarName(col);
+                      setTimeout(() => setCopiedVarName(null), 2000);
+                    }}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      background: "var(--v-surface)",
+                      border: "1px solid rgba(99, 102, 241, 0.3)",
+                      borderRadius: 6,
+                      padding: "4px 10px",
+                      fontSize: "0.75rem",
+                      fontWeight: 600,
+                      color: "var(--v-accent)",
+                      cursor: "pointer",
+                      boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                    }}
+                  >
+                    <span>{`{{${col}}}`}</span>
+                    <span style={{ fontSize: "0.7rem", color: "var(--v-text-muted)" }}>
+                      = "{csvRows[activeRowIndex]?.[col] || ""}"
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Table */}
+          {csvRows.length === 0 ? (
+            <div style={{ padding: 48, textAlign: "center", background: "var(--v-surface)", borderRadius: 10, border: "1px dashed var(--v-border)" }}>
+              <FileSpreadsheet size={36} style={{ color: "var(--v-text-muted)", margin: "0 auto 12px" }} />
+              <h3 style={{ fontSize: "0.95rem", fontWeight: 700, margin: "0 0 6px 0", color: "var(--v-text)" }}>
+                No CSV Data Loaded Yet
+              </h3>
+              <p style={{ fontSize: "0.82rem", color: "var(--v-text-secondary)", maxWidth: 460, margin: "0 auto 16px" }}>
+                Upload a CSV file or load sample timesheet data to dynamically provide input values into your workflow actions.
+              </p>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  onClick={handleLoadSampleCsv}
+                >
+                  <Sparkles size={14} />
+                  Load Sample Timesheet Data
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => document.getElementById("csv-file-upload")?.click()}
+                >
+                  <Upload size={14} />
+                  Upload CSV File
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto", border: "1px solid var(--v-border)", borderRadius: 10, background: "var(--v-surface)" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
+                <thead>
+                  <tr style={{ background: "var(--v-surface-2)", borderBottom: "1px solid var(--v-border)" }}>
+                    <th style={{ padding: "10px 12px", width: 60, textAlign: "center", fontWeight: 700, color: "var(--v-text-secondary)" }}>
+                      Active
+                    </th>
+                    <th style={{ padding: "10px 12px", width: 45, fontWeight: 700, color: "var(--v-text-secondary)" }}>
+                      #
+                    </th>
+                    {csvColumns.map((col) => (
+                      <th key={col} style={{ padding: "10px 12px", textAlign: "left", fontWeight: 700, color: "var(--v-text)" }}>
+                        {col}
+                      </th>
+                    ))}
+                    <th style={{ padding: "10px 12px", width: 50, textAlign: "center" }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {csvRows.map((row, rIdx) => (
+                    <tr
+                      key={rIdx}
+                      style={{
+                        borderBottom: "1px solid var(--v-border)",
+                        background: activeRowIndex === rIdx ? "rgba(99, 102, 241, 0.05)" : "transparent",
+                      }}
+                    >
+                      <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                        <input
+                          type="radio"
+                          name="activeCsvRow"
+                          checked={activeRowIndex === rIdx}
+                          onChange={() => setActiveRowIndex(rIdx)}
+                          title="Select this row as the active input dataset"
+                          style={{ cursor: "pointer" }}
+                        />
+                      </td>
+                      <td style={{ padding: "8px 12px", color: "var(--v-text-muted)", fontWeight: 600 }}>
+                        {rIdx + 1}
+                      </td>
+                      {csvColumns.map((col) => (
+                        <td key={col} style={{ padding: "6px 12px" }}>
+                          <input
+                            type="text"
+                            value={row[col] ?? ""}
+                            onChange={(e) => handleCsvCellChange(rIdx, col, e.target.value)}
+                            className="sb-input"
+                            style={{ height: 32, padding: "4px 8px", fontSize: "0.8rem" }}
+                          />
+                        </td>
+                      ))}
+                      <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveCsvRow(rIdx)}
+                          style={{ background: "transparent", border: "none", color: "var(--v-text-muted)", cursor: "pointer", padding: 4 }}
+                          title="Delete this row"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* =========================================================================
           4. ACTION CONFIGURATION MODAL (Only asks necessary questions)

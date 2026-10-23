@@ -227,6 +227,14 @@ def resolve_locator_safely(
                 except Exception:
                     pass
 
+            # In APEX & component libraries, tree items use .a-TreeView-label or text
+            try:
+                tree_label = page.locator(f".a-TreeView-label:has-text('{l_val}')")
+                if tree_label.count() > 0:
+                    return check_ambiguity(tree_label, desc)
+            except Exception:
+                pass
+
         # Try Associated Label
         try:
             candidate = page.get_by_label(l_val)
@@ -298,7 +306,17 @@ def ensure_navigation_expanded(page: Page, log: Callable[[str], None] | None = N
     """
     Checks if an application navigation drawer / sidebar is currently collapsed,
     and expands it if so. Generic across Oracle APEX, Bootstrap, Ant Design, Material UI, and standard admin templates.
+    Never toggles if navigation is already expanded and visible!
     """
+    # 1. First verify if the navigation tree/container is ALREADY expanded and visible
+    tree_nav = page.locator("#t_TreeNav, .t-Body-nav, .a-TreeView, nav.navbar-collapse.show, aside.main-sidebar").first
+    try:
+        if tree_nav.count() > 0 and tree_nav.is_visible():
+            # Navigation drawer is already open! Do NOT toggle or click button
+            return False
+    except Exception:
+        pass
+
     nav_toggle_selectors = [
         "#t_Button_navControl",
         "button.a-Button--navControl",
@@ -317,12 +335,12 @@ def ensure_navigation_expanded(page: Page, log: Callable[[str], None] | None = N
             btn = page.locator(sel).first
             if btn.count() > 0 and btn.is_visible():
                 aria_exp = btn.get_attribute("aria-expanded")
-                # Expand if not expanded
-                if aria_exp == "false" or (sel == "#t_Button_navControl" and aria_exp != "true"):
+                # Expand only if explicitly collapsed
+                if aria_exp == "false" or (sel == "#t_Button_navControl" and not aria_exp):
                     if log:
-                        log(f"Navigation menu is collapsed ({sel}, aria-expanded={aria_exp}). Automatically expanding...")
+                        log(f"Navigation menu is collapsed ({sel}). Automatically expanding...")
                     btn.click()
-                    page.wait_for_timeout(1000)
+                    page.wait_for_timeout(400)
                     return True
         except Exception:
             continue
@@ -334,125 +352,98 @@ def robust_click(
     locator_type: str | None,
     locator_val: str,
     role_hint: str | None = None,
-    timeout: int = 15000,
+    timeout: int = 10000,
     log: Callable[[str], None] | None = None,
 ) -> None:
     """
-    Performs a resilient click operation against modern dynamic SPAs (APEX, React, Oracle Cloud):
-      1. Pre-waits for DOM readiness.
-      2. Multi-attempt click with fresh locator resolution on each attempt to survive DOM detachment.
-      3. Automatic expansion of collapsed navigation sidebars/drawers when targeting menu items.
-      4. Automatic fallback to force-click.
-      5. Automatic fallback to direct href navigation for <a> tags.
-      6. Automatic fallback to JavaScript evaluation (el.click()).
-      7. Automatic fallback to full-DOM text match and click.
+    High-performance resilient click operation for modern dynamic web applications:
+      1. Immediate fast-path locator check (< 100ms).
+      2. High-speed DOM search across accessible roles and treeview items (< 20ms).
+      3. Automatic navigation expansion only if required.
+      4. Targeted fallback to force-click or JS click without excessive waiting.
     """
     if not locator_val:
         raise ValueError("Locator value cannot be empty for click action.")
 
+    clean_target = locator_val.strip()
+
+    # Fast-Path 1: Direct locator resolution & immediate click if element exists
     try:
-        page.wait_for_load_state("domcontentloaded", timeout=3000)
-    except Exception:
-        pass
-
-    last_error = None
-    attempt_timeout = min(timeout, 8000)
-
-    for attempt in range(1, 4):
-        try:
-            loc = resolve_locator_safely(page, locator_type, locator_val, role_hint=role_hint)
-            cnt = loc.count()
-            if log:
-                log(f"[DEBUG] Attempt {attempt} locator: {loc} (count={cnt})")
-            # If locator has 0 count on attempt, try expanding nav drawer in case target is in collapsed menu
-            if cnt == 0:
-                if ensure_navigation_expanded(page, log=log):
-                    loc = resolve_locator_safely(page, locator_type, locator_val, role_hint=role_hint)
-                    cnt = loc.count()
-                    if log:
-                        log(f"[DEBUG] After nav expansion, locator count={cnt}")
-
-            loc.first.wait_for(state="visible", timeout=attempt_timeout)
-            loc.first.click(timeout=attempt_timeout)
+        loc = resolve_locator_safely(page, locator_type, clean_target, role_hint=role_hint)
+        if loc.count() > 0 and loc.first.is_visible():
+            loc.first.click(timeout=3000)
             return
-        except Exception as exc:
-            last_error = exc
-            err_msg = str(exc)
-            if log:
-                log(f"[DEBUG] Click attempt {attempt} failed: {exc.__class__.__name__}: {err_msg[:120]}")
-
-    # Fallback 1: Force click
-    try:
-        if log:
-            log(f"Attempting force click on '{locator_val}'...")
-        loc = resolve_locator_safely(page, locator_type, locator_val, role_hint=role_hint)
-        loc.first.click(force=True, timeout=5000)
-        return
     except Exception as exc:
-        last_error = exc
+        if log:
+            log(f"[DEBUG] Immediate locator check failed: {exc}")
 
-    # Fallback 2: Direct href navigation if element is an anchor link
+    # Fast-Path 2: Try expanding navigation menu if target might be inside a collapsed drawer
     try:
-        loc = resolve_locator_safely(page, locator_type, locator_val, role_hint=role_hint)
-        tag = loc.first.evaluate("el => el.tagName.toLowerCase()")
-        if tag == "a":
-            href = loc.first.get_attribute("href")
-            if href:
-                if log:
-                    log(f"Target is a hyperlink. Navigating directly to href: {href}")
-                if href.startswith(("http://", "https://")):
-                    target_url = href
-                else:
-                    origin = page.url.split("/ords")[0] if "/ords" in page.url else page.url.rstrip("/")
-                    target_url = f"{origin}{href}" if href.startswith("/") else f"{origin}/{href}"
-                page.goto(target_url, wait_until="domcontentloaded", timeout=timeout)
+        if ensure_navigation_expanded(page, log=log):
+            loc = resolve_locator_safely(page, locator_type, clean_target, role_hint=role_hint)
+            if loc.count() > 0 and loc.first.is_visible():
+                loc.first.click(timeout=3000)
                 return
     except Exception:
         pass
 
-    # Fallback 3: JavaScript click
+    # Fast-Path 3: High-speed in-browser DOM text matching (resolves APEX treeitems & SPAs in < 20ms)
     try:
-        if log:
-            log(f"Attempting JavaScript evaluation click on '{locator_val}'...")
-        loc = resolve_locator_safely(page, locator_type, locator_val, role_hint=role_hint)
-        loc.first.evaluate("el => el.click()")
-        return
-    except Exception as exc:
-        last_error = exc
-
-    # Fallback 4: DOM search by text match across all interactive nodes
-    try:
-        if log:
-            log(f"Searching DOM for interactive element matching text '{locator_val}'...")
         clicked = page.evaluate("""(targetText) => {
             const clean = targetText.trim().toLowerCase();
-            const elements = Array.from(document.querySelectorAll('a, button, [role="treeitem"], [role="menuitem"], [role="tab"], li, span, div.a-TreeView-content'));
+            const elements = Array.from(document.querySelectorAll(
+                '.a-TreeView-label, .a-TreeView-content, [role="treeitem"], [role="menuitem"], [role="tab"], a, button, li, span'
+            ));
             for (const el of elements) {
                 const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
-                if (txt === clean) {
+                if (txt === clean && el.offsetParent !== null) {
                     el.click();
                     return true;
                 }
             }
             for (const el of elements) {
                 const txt = (el.innerText || el.textContent || '').trim().toLowerCase();
-                if (txt.includes(clean)) {
+                if (txt.includes(clean) && el.offsetParent !== null) {
                     el.click();
                     return true;
                 }
             }
             return false;
-        }""", locator_val)
+        }""", clean_target)
         if clicked:
             if log:
-                log(f"Successfully clicked DOM element matching text '{locator_val}'.")
-            page.wait_for_timeout(1000)
+                log(f"Successfully clicked '{clean_target}' via fast interactive DOM resolver.")
+            page.wait_for_timeout(400)
             return
+    except Exception as exc:
+        if log:
+            log(f"[DEBUG] Fast DOM resolver failed: {exc}")
+
+    # Fallback 1: Standard wait-for-visible with tight timeout
+    last_error = None
+    try:
+        loc = resolve_locator_safely(page, locator_type, clean_target, role_hint=role_hint)
+        loc.first.wait_for(state="visible", timeout=2500)
+        loc.first.click(timeout=2500)
+        return
     except Exception as exc:
         last_error = exc
 
-    if last_error:
-        raise last_error
+    # Fallback 2: Force click with 2s timeout
+    try:
+        loc = resolve_locator_safely(page, locator_type, clean_target, role_hint=role_hint)
+        loc.first.click(force=True, timeout=2000)
+        return
+    except Exception as exc:
+        last_error = exc
+
+    # Fallback 3: JavaScript direct element click
+    try:
+        loc = resolve_locator_safely(page, locator_type, clean_target, role_hint=role_hint)
+        loc.first.evaluate("el => el.click()", timeout=2000)
+        return
+    except Exception as exc:
+        last_error = exc
 
     if last_error:
         raise last_error
@@ -666,13 +657,12 @@ def handle_navigate(
 
     if not is_path and (nav_method == "click" or raw_target):
         log(f"Navigating by clicking UI link/menu item '{raw_target}'...")
-        ensure_navigation_expanded(page, log=log)
         robust_click(page, locator_type, raw_target, role_hint="link", timeout=step_timeout, log=log)
         try:
-            page.wait_for_load_state("domcontentloaded", timeout=step_timeout)
+            page.wait_for_load_state("domcontentloaded", timeout=min(step_timeout, 5000))
         except Exception:
             pass
-        page.wait_for_timeout(1000)
+        page.wait_for_timeout(400)
         return f"Navigated to '{raw_target}'", raw_target
     else:
         path = raw_target or "/"
@@ -927,7 +917,12 @@ def run_generic_scenario(
         interp_context["password"] = decrypted_credentials.get("secret", "")
     if dataset_row:
         for k, v in dataset_row.items():
-            interp_context[k] = v
+            clean_k = str(k).strip()
+            interp_context[clean_k] = str(v)
+            interp_context[clean_k.lower()] = str(v)
+            interp_context[clean_k.lower().replace(" ", "_")] = str(v)
+            interp_context[clean_k.lower().replace("_", " ")] = str(v)
+        log(f"Loaded CSV input parameters ({len(dataset_row)} fields): {dataset_row}")
 
     steps: list[dict[str, Any]] = scenario.get("steps", [])
     failure_policy = scenario.get("failure_policy", "stop")

@@ -1,0 +1,24 @@
+[2026-10-23 12:24:10 UTC] Starting execution for: 'Speed & CSV Test Workflow' (Run ID: 90cddc32-c6fa-4ffb-a2cd-93f9b41918d3)
+[2026-10-23 12:24:10 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-23 12:24:10 UTC] Browser: chromium (Headless: True)
+[2026-10-23 12:24:10 UTC] Loaded CSV input parameters (3 fields): {'Hours': '8.0', 'Task_Name': 'Development', 'Comments': 'Fast test run'}
+[2026-10-23 12:24:17 UTC] [RUNNING] Step 1: Open Base URL (action: open_app)
+[2026-10-23 12:24:17 UTC] Opening application at: https://oracleapex.com/ords/r/lokesh354/timesheet-application/
+[2026-10-23 12:24:28 UTC] [PASSED] Step 1 finished in 9613ms
+[2026-10-23 12:24:28 UTC] [RUNNING] Step 2: Vault Login (action: login)
+[2026-10-23 12:24:29 UTC] Entering username for account 'lokesh' into login form...
+[2026-10-23 12:24:29 UTC] Entering encrypted vault password into password field...
+[2026-10-23 12:24:29 UTC] Submitting login form...
+[2026-10-23 12:24:32 UTC] Navigation menu is collapsed (#t_Button_navControl). Automatically expanding...
+[2026-10-23 12:24:33 UTC] [PASSED] Step 2 finished in 4549ms
+[2026-10-23 12:24:33 UTC] [RUNNING] Step 3: Navigate to My Timesheet (action: navigate)
+[2026-10-23 12:24:33 UTC] Navigating by clicking UI link/menu item 'My Timesheet'...
+[2026-10-23 12:24:33 UTC] Successfully clicked 'My Timesheet' via fast interactive DOM resolver.
+[2026-10-23 12:24:34 UTC] [PASSED] Step 3 finished in 868ms
+[2026-10-23 12:24:34 UTC] [RUNNING] Step 4: Navigate to Whereabouts (action: navigate)
+[2026-10-23 12:24:34 UTC] Navigating by clicking UI link/menu item 'Whereabouts'...
+[2026-10-23 12:24:34 UTC] Successfully clicked 'Whereabouts' via fast interactive DOM resolver.
+[2026-10-23 12:24:35 UTC] [PASSED] Step 4 finished in 1286ms
+[2026-10-23 12:24:39 UTC] Video saved and registered: recording.webm
+[2026-10-23 12:24:39 UTC] Workflow execution completed with status: PASSED
+[2026-10-23 12:24:39 UTC] Summary: 4/4 passed, 0 failed, 0 skipped.

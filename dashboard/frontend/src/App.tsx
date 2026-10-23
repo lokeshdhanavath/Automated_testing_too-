@@ -450,6 +450,30 @@ async function loadTests(projectId?: string) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-reconnect polling when backend is disconnected
+  useEffect(() => {
+    if (backendStatus === "Connected") return;
+
+    const timer = setInterval(async () => {
+      try {
+        const health = await checkBackendHealth();
+        if (health?.status === "ok") {
+          setBackendStatus("Connected");
+          addLog(`Backend connected: ${health.application ?? "FastAPI API"}`);
+          void refreshProjects();
+          if (activeProjectId) {
+            void loadTests(activeProjectId);
+            void loadProjectRuns();
+          }
+        }
+      } catch {
+        // Backend still offline, retry on next tick
+      }
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, [backendStatus, activeProjectId]);
+
   useEffect(() => {
     if (!activeRunId || !running) return;
 

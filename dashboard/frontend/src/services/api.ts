@@ -1,4 +1,7 @@
-export const API_BASE_URL = "http://127.0.0.1:8000";
+export const API_BASE_URL =
+  typeof window !== "undefined" && (window.location.port === "5173" || window.location.port === "5174")
+    ? ""
+    : "http://127.0.0.1:8000";
 
 async function apiRequest<T>(
   path: string,
@@ -33,6 +36,9 @@ async function apiRequest<T>(
     if (method === "GET" && retries > 0) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       return apiRequest<T>(path, options, retries - 1);
+    }
+    if (fetchErr.message === "Failed to fetch" || fetchErr.name === "TypeError") {
+      throw new Error("Unable to connect to backend server. Please verify FastAPI is running at http://127.0.0.1:8000.");
     }
     throw fetchErr;
   } finally {
@@ -694,6 +700,8 @@ export interface DynamicWorkflowPayload {
   timeout_seconds?: number;
   steps: ScenarioStep[];
   save_as_scenario?: boolean;
+  dataset_row?: Record<string, any>;
+  dataset_rows?: Record<string, any>[];
 }
 
 export async function runDynamicWorkflow(

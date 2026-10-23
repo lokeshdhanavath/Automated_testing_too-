@@ -96,6 +96,8 @@ class DynamicWorkflowPayload(BaseModel):
     timeout_seconds: int = Field(default=90, ge=1, le=600)
     steps: list[StepPayload] = Field(default_factory=list)
     save_as_scenario: bool = False
+    dataset_row: dict[str, Any] | None = None
+    dataset_rows: list[dict[str, Any]] | None = None
 
 
 class DataProfilePayload(BaseModel):
@@ -638,7 +640,7 @@ def trigger_dynamic_workflow_run(project_id: str, payload: DynamicWorkflowPayloa
         # Launch background execution thread
         Thread(
             target=_execute_scenario_background,
-            args=(run_uuid, project, scenario_dict, decrypted_cred, None),
+            args=(run_uuid, project, scenario_dict, decrypted_cred, payload.dataset_row),
             daemon=True,
         ).start()
 
