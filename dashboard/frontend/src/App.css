@@ -2861,6 +2861,113 @@ code, pre {
   opacity: 1;
 }
 
+.capture-launch-card {
+  padding: 24px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  background: var(--card-bg, #ffffff);
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
+}
+
+.capture-launch-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.capture-launch-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 650px;
+}
+
+.capture-app-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.capture-app-name {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-color, #0f172a);
+}
+
+.capture-app-url {
+  font-size: 0.82rem;
+  color: var(--vq-muted, #64748b);
+  background: #f1f5f9;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.capture-launch-hint {
+  font-size: 0.88rem;
+  color: var(--vq-muted, #64748b);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.capture-main-btn {
+  padding: 12px 28px !important;
+  font-size: 1rem !important;
+  font-weight: 700 !important;
+  background: #0284c7 !important;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.3) !important;
+  border-radius: 8px !important;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.capture-main-btn:hover {
+  background: #0369a1 !important;
+}
+
+.capture-connected-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.capture-live-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #065f46;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  padding: 5px 12px;
+  border-radius: 20px;
+}
+
+.catalog-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.catalog-header-left h2 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 0 0 2px 0;
+  color: var(--text-color, #0f172a);
+}
+
+.catalog-header-left p {
+  font-size: 0.82rem;
+  color: var(--vq-muted, #64748b);
+  margin: 0;
+}
+
 .capture-browser-card {
   padding: 20px;
   border: 1px solid var(--border-color, #e2e8f0);

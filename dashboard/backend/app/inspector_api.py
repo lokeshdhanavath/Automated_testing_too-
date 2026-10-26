@@ -554,15 +554,357 @@ def redact_sensitive_url(url: str) -> str:
         return url
 
 
-# Interactive Element Picker script (injected into target browser)
-PICKER_INJECTION_SCRIPT = """() => {
-    if (window.__VERIQON_REMOVE_PICKER__) {
-        try { window.__VERIQON_REMOVE_PICKER__(); } catch(e) {}
-    }
-    window.__VERIQON_PICKER_ACTIVE__ = true;
-    window.__VERIQON_PICKER_STATUS__ = "picking";
-    window.__VERIQON_PICKER_RESULT__ = null;
+# In-Browser Floating Capture Dock and Element Picker script (injected into target application browser)
+INPAGE_CAPTURE_DOCK_SCRIPT = """(() => {
+    const projectId = window.__VERIQON_PROJECT_ID__ || '';
+    if (!projectId) return;
 
+    if (document.getElementById('veriqon-inpage-dock')) {
+        return;
+    }
+
+    // Styles for Dock, Toasts, Highlighting, and Modal
+    if (!document.getElementById('veriqon-inpage-styles')) {
+        const style = document.createElement('style');
+        style.id = 'veriqon-inpage-styles';
+        style.textContent = `
+            #veriqon-inpage-dock {
+                position: fixed;
+                top: 18px;
+                right: 22px;
+                z-index: 2147483640;
+                background: rgba(15, 23, 42, 0.95);
+                backdrop-filter: blur(10px);
+                border: 1px solid rgba(56, 189, 248, 0.6);
+                border-radius: 12px;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(56, 189, 248, 0.25);
+                color: #f8fafc;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                font-size: 13px;
+                padding: 10px 14px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                min-width: 260px;
+                user-select: none;
+                transition: width 0.2s, padding 0.2s;
+            }
+            #veriqon-inpage-dock.vq-minimized {
+                min-width: 0;
+                padding: 6px 10px;
+            }
+            #veriqon-inpage-dock.vq-minimized .vq-dock-body {
+                display: none !important;
+            }
+            .vq-dock-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                cursor: grab;
+            }
+            .vq-dock-header:active {
+                cursor: grabbing;
+            }
+            .vq-dock-brand {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-weight: 700;
+                font-size: 12px;
+                color: #38bdf8;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+            }
+            .vq-dock-actions {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .vq-dock-ctrl-btn {
+                background: transparent;
+                border: none;
+                color: #94a3b8;
+                font-size: 15px;
+                cursor: pointer;
+                padding: 2px 6px;
+                border-radius: 4px;
+                line-height: 1;
+            }
+            .vq-dock-ctrl-btn:hover {
+                color: #ffffff;
+                background: rgba(255, 255, 255, 0.15);
+            }
+            .vq-dock-body {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+            }
+            .vq-dock-btn {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+                border: 1px solid transparent;
+                cursor: pointer;
+                transition: all 0.15s ease;
+            }
+            .vq-dock-btn-primary {
+                background: #0284c7;
+                color: #ffffff;
+                border-color: #38bdf8;
+            }
+            .vq-dock-btn-primary:hover {
+                background: #0369a1;
+            }
+            .vq-dock-btn-secondary {
+                background: rgba(30, 41, 59, 0.9);
+                color: #38bdf8;
+                border-color: rgba(56, 189, 248, 0.4);
+            }
+            .vq-dock-btn-secondary:hover {
+                background: rgba(56, 189, 248, 0.15);
+                border-color: #38bdf8;
+            }
+            .vq-dock-btn.active-picking {
+                background: #ef4444;
+                color: white;
+                border-color: #f87171;
+                animation: vqPulse 1.5s infinite;
+            }
+            @keyframes vqPulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.75; }
+            }
+            .vq-toast {
+                position: fixed;
+                bottom: 24px;
+                right: 24px;
+                z-index: 2147483647;
+                background: #0f172a;
+                color: #10b981;
+                border: 1px solid #10b981;
+                padding: 10px 16px;
+                border-radius: 8px;
+                font-family: sans-serif;
+                font-size: 13px;
+                font-weight: 600;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+                animation: vqFadeIn 0.25s ease;
+            }
+            @keyframes vqFadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+            }
+            #veriqon-element-modal-overlay {
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0, 0, 0, 0.65);
+                backdrop-filter: blur(2px);
+                z-index: 2147483646;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            #veriqon-element-modal {
+                background: #0f172a;
+                border: 1px solid #0284c7;
+                border-radius: 12px;
+                padding: 20px;
+                width: 380px;
+                max-width: 90vw;
+                box-shadow: 0 20px 40px rgba(0,0,0,0.8), 0 0 20px rgba(2, 132, 199, 0.3);
+                color: #f8fafc;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            }
+            .vq-modal-title {
+                font-size: 15px;
+                font-weight: 700;
+                color: #38bdf8;
+                margin: 0 0 4px 0;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .vq-modal-subtitle {
+                font-size: 11px;
+                color: #94a3b8;
+                margin-bottom: 14px;
+            }
+            .vq-chip-row {
+                display: flex;
+                gap: 6px;
+                flex-wrap: wrap;
+                margin-bottom: 12px;
+            }
+            .vq-chip {
+                background: rgba(56, 189, 248, 0.12);
+                color: #38bdf8;
+                border: 1px solid rgba(56, 189, 248, 0.3);
+                padding: 3px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            .vq-field-group {
+                margin-bottom: 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+            .vq-field-label {
+                font-size: 11px;
+                font-weight: 600;
+                color: #cbd5e1;
+                text-transform: uppercase;
+            }
+            .vq-modal-input {
+                background: #1e293b;
+                border: 1px solid #334155;
+                color: #f8fafc;
+                padding: 8px 10px;
+                border-radius: 6px;
+                font-size: 13px;
+                outline: none;
+                width: 100%;
+                box-sizing: border-box;
+            }
+            .vq-modal-input:focus {
+                border-color: #38bdf8;
+                box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+            }
+            .vq-modal-actions {
+                display: flex;
+                gap: 8px;
+                margin-top: 16px;
+            }
+            .vq-modal-actions button {
+                flex: 1;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+            .vq-btn-save {
+                background: #10b981;
+                color: white;
+                border: none;
+            }
+            .vq-btn-save:hover {
+                background: #059669;
+            }
+            .vq-btn-cancel {
+                background: #334155;
+                color: #cbd5e1;
+                border: none;
+            }
+            .vq-btn-cancel:hover {
+                background: #475569;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // Build the dock HTML
+    const dock = document.createElement('div');
+    dock.id = 'veriqon-inpage-dock';
+    dock.innerHTML = `
+        <div class="vq-dock-header" id="vq-dock-drag-header">
+            <div class="vq-dock-brand">
+                <span>⚡ Veriqon Capture</span>
+            </div>
+            <div class="vq-dock-actions">
+                <button class="vq-dock-ctrl-btn" id="vq-dock-min-btn" title="Minimize / Expand">_</button>
+            </div>
+        </div>
+        <div class="vq-dock-body" id="vq-dock-body">
+            <button class="vq-dock-btn vq-dock-btn-primary" id="vq-btn-capture-page">
+                📸 Capture This Page
+            </button>
+            <button class="vq-dock-btn vq-dock-btn-secondary" id="vq-btn-capture-element">
+                🎯 Capture Any Element
+            </button>
+        </div>
+    `;
+    document.body.appendChild(dock);
+
+    function showToast(text, isError = false) {
+        const existing = document.getElementById('vq-inpage-toast');
+        if (existing) existing.remove();
+        const toast = document.createElement('div');
+        toast.id = 'vq-inpage-toast';
+        toast.className = 'vq-toast';
+        if (isError) {
+            toast.style.borderColor = '#ef4444';
+            toast.style.color = '#f87171';
+        }
+        toast.innerText = text;
+        document.body.appendChild(toast);
+        setTimeout(() => { if (toast.parentNode) toast.remove(); }, 3500);
+    }
+
+    // Draggable header
+    const header = document.getElementById('vq-dock-drag-header');
+    let isDragging = false;
+    let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+    header.addEventListener('mousedown', (e) => {
+        if (e.target.id === 'vq-dock-min-btn') return;
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        const rect = dock.getBoundingClientRect();
+        startLeft = rect.left;
+        startTop = rect.top;
+        dock.style.right = 'auto';
+        dock.style.left = startLeft + 'px';
+        dock.style.top = startTop + 'px';
+    });
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        dock.style.left = Math.max(10, Math.min(window.innerWidth - 100, startLeft + dx)) + 'px';
+        dock.style.top = Math.max(10, Math.min(window.innerHeight - 50, startTop + dy)) + 'px';
+    });
+    document.addEventListener('mouseup', () => { isDragging = false; });
+
+    // Minimize button
+    const minBtn = document.getElementById('vq-dock-min-btn');
+    minBtn.addEventListener('click', () => {
+        dock.classList.toggle('vq-minimized');
+        minBtn.innerText = dock.classList.contains('vq-minimized') ? '□' : '_';
+    });
+
+    // Capture Page button
+    const capturePageBtn = document.getElementById('vq-btn-capture-page');
+    capturePageBtn.addEventListener('click', async () => {
+        capturePageBtn.innerText = '⏳ Capturing page...';
+        capturePageBtn.disabled = true;
+        try {
+            const resp = await fetch(`http://127.0.0.1:8000/api/inspector/${encodeURIComponent(projectId)}/capture-page`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                showToast(`✓ Captured ${data.total_scanned} elements on "${data.page_name || 'This Page'}"!`);
+            } else {
+                showToast(`Capture failed: ${data.detail || 'Unknown error'}`, true);
+            }
+        } catch (err) {
+            showToast(`Capture failed: ${err.message}`, true);
+        } finally {
+            capturePageBtn.innerText = '📸 Capture This Page';
+            capturePageBtn.disabled = false;
+        }
+    });
+
+    // Element Picker mode setup
     let overlay = document.getElementById('veriqon-picker-overlay');
     if (!overlay) {
         overlay = document.createElement('div');
@@ -570,14 +912,13 @@ PICKER_INJECTION_SCRIPT = """() => {
         overlay.style.position = 'fixed';
         overlay.style.pointerEvents = 'none';
         overlay.style.border = '2px solid #06b6d4';
-        overlay.style.backgroundColor = 'rgba(6, 182, 212, 0.18)';
+        overlay.style.backgroundColor = 'rgba(6, 182, 212, 0.2)';
         overlay.style.borderRadius = '4px';
-        overlay.style.zIndex = '2147483647';
+        overlay.style.zIndex = '2147483645';
         overlay.style.transition = 'all 0.05s ease';
         overlay.style.display = 'none';
         document.body.appendChild(overlay);
     }
-
     let badge = document.getElementById('veriqon-picker-badge');
     if (!badge) {
         badge = document.createElement('div');
@@ -591,8 +932,8 @@ PICKER_INJECTION_SCRIPT = """() => {
         badge.style.fontWeight = '600';
         badge.style.padding = '4px 10px';
         badge.style.borderRadius = '5px';
-        badge.style.boxShadow = '0 4px 14px rgba(0,0,0,0.4)';
-        badge.style.zIndex = '2147483647';
+        badge.style.boxShadow = '0 4px 14px rgba(0,0,0,0.5)';
+        badge.style.zIndex = '2147483645';
         badge.style.display = 'none';
         badge.style.whiteSpace = 'nowrap';
         document.body.appendChild(badge);
@@ -644,6 +985,7 @@ PICKER_INJECTION_SCRIPT = """() => {
     function findInteractiveTarget(el) {
         if (!el || el === document.body || el === document.documentElement) return null;
         if (el.id === 'veriqon-picker-overlay' || el.id === 'veriqon-picker-badge') return null;
+        if (el.closest('#veriqon-inpage-dock') || el.closest('#veriqon-element-modal-overlay')) return null;
         const candidate = el.closest('button, a, input:not([type="hidden"]), select, textarea, [role="button"], [role="link"], [role="treeitem"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"], .project-option, .t-Button, .a-TreeView-label, .hours-input, .project-name, .project-picker-close');
         return candidate || el;
     }
@@ -757,9 +1099,43 @@ PICKER_INJECTION_SCRIPT = """() => {
         };
     }
 
-    function onMouseMove(e) {
-        if (!window.__VERIQON_PICKER_ACTIVE__) return;
-        if (window.__VERIQON_PICKER_STATUS__ === "selected") return;
+    const captureElemBtn = document.getElementById('vq-btn-capture-element');
+    let pickerActive = false;
+
+    function stopPicker() {
+        pickerActive = false;
+        window.__VERIQON_PICKER_ACTIVE__ = false;
+        window.__VERIQON_PICKER_STATUS__ = "idle";
+        captureElemBtn.innerText = '🎯 Capture Any Element';
+        captureElemBtn.classList.remove('active-picking');
+        overlay.style.display = 'none';
+        badge.style.display = 'none';
+    }
+
+    function startPicker() {
+        pickerActive = true;
+        window.__VERIQON_PICKER_ACTIVE__ = true;
+        window.__VERIQON_PICKER_STATUS__ = "picking";
+        captureElemBtn.innerText = '✕ Cancel Selection';
+        captureElemBtn.classList.add('active-picking');
+        showToast('🎯 Click any element on the page to capture it');
+    }
+
+    captureElemBtn.addEventListener('click', () => {
+        if (pickerActive) {
+            stopPicker();
+        } else {
+            startPicker();
+        }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!pickerActive) return;
+        if (e.target.closest('#veriqon-inpage-dock') || e.target.closest('#veriqon-element-modal-overlay')) {
+            overlay.style.display = 'none';
+            badge.style.display = 'none';
+            return;
+        }
 
         const target = findInteractiveTarget(document.elementFromPoint(e.clientX, e.clientY));
         if (!target) {
@@ -769,31 +1145,28 @@ PICKER_INJECTION_SCRIPT = """() => {
         }
 
         const r = target.getBoundingClientRect();
-        overlay.style.top = `${r.top - 2}px`;
-        overlay.style.left = `${r.left - 2}px`;
-        overlay.style.width = `${r.width + 4}px`;
-        overlay.style.height = `${r.height + 4}px`;
-        overlay.style.borderColor = '#06b6d4';
-        overlay.style.backgroundColor = 'rgba(6, 182, 212, 0.18)';
+        overlay.style.top = (r.top - 2) + 'px';
+        overlay.style.left = (r.left - 2) + 'px';
+        overlay.style.width = (r.width + 4) + 'px';
+        overlay.style.height = (r.height + 4) + 'px';
         overlay.style.display = 'block';
 
         const tag = target.tagName.toLowerCase();
         const role = target.getAttribute('role') || tag;
         const txt = (target.innerText || target.getAttribute('aria-label') || target.getAttribute('placeholder') || target.id || tag).trim().slice(0, 25);
         badge.innerText = `🎯 [${role}] ${txt}`;
-        badge.style.background = '#0f172a';
-        badge.style.color = '#38bdf8';
-
         let badgeTop = r.top - 28;
         if (badgeTop < 0) badgeTop = r.bottom + 6;
-        badge.style.top = `${badgeTop}px`;
-        badge.style.left = `${Math.max(10, r.left)}px`;
+        badge.style.top = badgeTop + 'px';
+        badge.style.left = Math.max(10, r.left) + 'px';
         badge.style.display = 'block';
-    }
+    }, true);
 
-    function onClick(e) {
-        if (!window.__VERIQON_PICKER_ACTIVE__) return;
-        if (window.__VERIQON_PICKER_STATUS__ === "selected") return;
+    document.addEventListener('click', (e) => {
+        if (!pickerActive) return;
+        if (e.target.closest('#veriqon-inpage-dock') || e.target.closest('#veriqon-element-modal-overlay')) {
+            return;
+        }
 
         e.preventDefault();
         e.stopPropagation();
@@ -802,30 +1175,125 @@ PICKER_INJECTION_SCRIPT = """() => {
         const target = findInteractiveTarget(document.elementFromPoint(e.clientX, e.clientY));
         if (!target) return;
 
-        overlay.style.borderColor = '#10b981';
-        overlay.style.backgroundColor = 'rgba(16, 185, 129, 0.25)';
-        badge.innerText = `✓ Selected: ${(target.innerText || target.id || target.tagName).slice(0, 25)}`;
-        badge.style.background = '#064e3b';
-        badge.style.color = '#34d399';
-
         const meta = extractMetadata(target);
         window.__VERIQON_PICKER_RESULT__ = meta;
         window.__VERIQON_PICKER_STATUS__ = "selected";
+        stopPicker();
+        openNamingModal(meta);
+    }, true);
+
+    function openNamingModal(meta) {
+        const existing = document.getElementById('veriqon-element-modal-overlay');
+        if (existing) existing.remove();
+
+        const overlayModal = document.createElement('div');
+        overlayModal.id = 'veriqon-element-modal-overlay';
+        overlayModal.innerHTML = `
+            <div id="veriqon-element-modal">
+                <div class="vq-modal-title">
+                    <span>🎯 Save Selected Element</span>
+                    <button id="vq-modal-close-btn" class="vq-dock-ctrl-btn">✕</button>
+                </div>
+                <div class="vq-modal-subtitle">Confirm mapped name and save to application catalog</div>
+
+                <div class="vq-chip-row">
+                    <span class="vq-chip">&lt;${meta.tag_name}&gt;</span>
+                    <span class="vq-chip">${meta.category}</span>
+                    ${meta.role ? `<span class="vq-chip">role="${meta.role}"</span>` : ''}
+                    ${meta.in_dialog ? `<span class="vq-chip">Modal: ${meta.dialog_title || 'Dialog'}</span>` : ''}
+                </div>
+
+                <div class="vq-field-group">
+                    <label class="vq-field-label">Mapped Name *</label>
+                    <input id="vq-input-name" class="vq-modal-input" value="${(meta.friendly_name || '').replace(/"/g, '&quot;')}" placeholder="e.g. Save Timesheet button" />
+                </div>
+
+                <div class="vq-field-group">
+                    <label class="vq-field-label">Description (Optional)</label>
+                    <input id="vq-input-desc" class="vq-modal-input" value="${(meta.description || '').replace(/"/g, '&quot;')}" placeholder="e.g. Submits the timesheet for the week" />
+                </div>
+
+                <div style="font-size:11px; color:#64748b; margin-top:8px;">
+                    Locator: <code>${meta.locator_strategy} = ${meta.locator_value}</code>
+                </div>
+
+                <div class="vq-modal-actions">
+                    <button class="vq-btn-save" id="vq-btn-save-element">Save Element</button>
+                    <button class="vq-btn-cancel" id="vq-btn-cancel-modal">Cancel</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(overlayModal);
+
+        const nameInput = document.getElementById('vq-input-name');
+        nameInput.focus();
+        nameInput.select();
+
+        const closeModal = () => { overlayModal.remove(); };
+        document.getElementById('vq-modal-close-btn').addEventListener('click', closeModal);
+        document.getElementById('vq-btn-cancel-modal').addEventListener('click', closeModal);
+
+        async function saveElement() {
+            const mappedName = nameInput.value.trim();
+            if (!mappedName) {
+                nameInput.style.borderColor = '#ef4444';
+                return;
+            }
+            const desc = document.getElementById('vq-input-desc').value.trim();
+            const payload = {
+                friendly_name: mappedName,
+                description: desc,
+                category: meta.category,
+                tag_name: meta.tag_name,
+                role: meta.role,
+                label: meta.label,
+                placeholder: meta.placeholder,
+                locator_strategy: meta.locator_strategy,
+                locator_value: meta.locator_value,
+                in_dialog: meta.in_dialog,
+                dialog_title: meta.dialog_title,
+                page_url: meta.page_url,
+                page_name: meta.page_title || document.title,
+            };
+
+            const saveBtn = document.getElementById('vq-btn-save-element');
+            saveBtn.innerText = 'Saving...';
+            saveBtn.disabled = true;
+
+            try {
+                const resp = await fetch(`http://127.0.0.1:8000/api/inspector/${encodeURIComponent(projectId)}/save-selected-element`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const resData = await resp.json();
+                if (resp.ok) {
+                    closeModal();
+                    showToast(`✓ Saved element "${mappedName}"!`);
+                } else {
+                    showToast(`Save failed: ${resData.detail || 'Error'}`, true);
+                    saveBtn.innerText = 'Save Element';
+                    saveBtn.disabled = false;
+                }
+            } catch (err) {
+                showToast(`Save failed: ${err.message}`, true);
+                saveBtn.innerText = 'Save Element';
+                saveBtn.disabled = false;
+            }
+        }
+
+        document.getElementById('vq-btn-save-element').addEventListener('click', saveElement);
+        nameInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') saveElement();
+            if (e.key === 'Escape') closeModal();
+        });
     }
 
-    window.addEventListener('mousemove', onMouseMove, true);
-    window.addEventListener('click', onClick, true);
+    window.__VERIQON_REMOVE_PICKER__ = stopPicker;
+    window.__VERIQON_START_PICKER__ = startPicker;
+})();"""
 
-    window.__VERIQON_REMOVE_PICKER__ = () => {
-        window.__VERIQON_PICKER_ACTIVE__ = false;
-        window.__VERIQON_PICKER_STATUS__ = "idle";
-        window.__VERIQON_PICKER_RESULT__ = null;
-        window.removeEventListener('mousemove', onMouseMove, true);
-        window.removeEventListener('click', onClick, true);
-        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
-        if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
-    };
-}"""
+PICKER_INJECTION_SCRIPT = INPAGE_CAPTURE_DOCK_SCRIPT
 
 
 # ---------------------------------------------------------------------------
@@ -1515,6 +1983,12 @@ class InspectorEngine:
         base_url = normalize_app_url(base_url)
         session = self.sessions.get(project_id)
 
+        dock_init = f"""(() => {{
+            window.__VERIQON_PROJECT_ID__ = "{project_id}";
+            window.__VERIQON_PROJECT_NAME__ = "{project_name}";
+        }})();
+        """ + INPAGE_CAPTURE_DOCK_SCRIPT
+
         # If session already open with same visibility mode, bring to front
         if session and not session["page"].is_closed():
             if session.get("visible", False) != visible:
@@ -1527,6 +2001,7 @@ class InspectorEngine:
             else:
                 try:
                     await session["page"].bring_to_front()
+                    await session["page"].evaluate(dock_init)
                 except Exception:
                     pass
                 session["last_active"] = time.time()
@@ -1539,6 +2014,7 @@ class InspectorEngine:
                 viewport={"width": 1440, "height": 900},
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
             )
+            await context.add_init_script(dock_init)
             page = await context.new_page()
         else:
             page = await self.browser.new_page(
@@ -1568,6 +2044,11 @@ class InspectorEngine:
             if with_login and username and secret:
                 authenticated = await self._login_if_needed(page, username, secret)
             await self._expand_nav(page)
+            # Ensure floating dock is evaluated on page
+            try:
+                await page.evaluate(dock_init)
+            except Exception:
+                pass
         except Exception as e:
             logger.warning(f"Error during browser navigation: {e}")
 
