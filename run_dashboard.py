@@ -15,7 +15,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 BACKEND_DIR = ROOT / "dashboard" / "backend"
 FRONTEND_DIR = ROOT / "dashboard" / "frontend"
-VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+
+if sys.platform == "win32":
+    VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
+else:
+    VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 
 python_bin = str(VENV_PYTHON if VENV_PYTHON.is_file() else sys.executable)
 
@@ -25,8 +29,15 @@ def main():
     print(" Starting Veriqon Automated Testing Platform")
     print("=" * 60)
 
+    # Prepare environment with standard system paths for macOS/Linux/Windows
+    proc_env = os.environ.copy()
+    if sys.platform != "win32":
+        extra_paths = ["/opt/homebrew/bin", "/usr/local/bin", str(ROOT / ".venv" / "bin")]
+        current_path = proc_env.get("PATH", "")
+        proc_env["PATH"] = ":".join(extra_paths) + ":" + current_path
+
     # 1. Start FastAPI backend
-    print("[1/2] Starting backend on http://127.0.0.1:8000 ...")
+    print(f"[1/2] Starting backend on http://127.0.0.1:8000 using {python_bin} ...")
     backend_cmd = [
         python_bin,
         "-m",
@@ -38,24 +49,24 @@ def main():
         "--port",
         "8000",
     ]
-    backend_proc = subprocess.Popen(backend_cmd, cwd=BACKEND_DIR)
+    backend_proc = subprocess.Popen(backend_cmd, cwd=BACKEND_DIR, env=proc_env)
 
     # 2. Start Vite frontend
     print("[2/2] Starting frontend on http://127.0.0.1:5173 ...")
     npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
     frontend_cmd = [npm_cmd, "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173"]
-    frontend_proc = subprocess.Popen(frontend_cmd, cwd=FRONTEND_DIR)
+    frontend_proc = subprocess.Popen(frontend_cmd, cwd=FRONTEND_DIR, env=proc_env)
 
     # Wait for FastAPI backend to be fully listening before opening the browser
     print("Waiting for FastAPI backend to be ready...")
     import urllib.request
     backend_ready = False
-    for attempt in range(20):
+    for attempt in range(30):
         try:
             with urllib.request.urlopen("http://127.0.0.1:8000/api/health", timeout=1) as resp:
                 if resp.status == 200:
                     backend_ready = True
-                    print("Backend is ready and connected!")
+                    print("Backend is ready and connected to PostgreSQL!")
                     break
         except Exception:
             time.sleep(0.5)
@@ -99,4 +110,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

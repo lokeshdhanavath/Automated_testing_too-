@@ -1,0 +1,21 @@
+[2026-10-26 19:45:23 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: f93d9cea-ec89-4303-aa54-39def9fa1005)
+[2026-10-26 19:45:23 UTC] Target Application: 'Instagram' at https://www.instagram.com
+[2026-10-26 19:45:23 UTC] Browser: chromium (Headless: True)
+[2026-10-26 19:45:23 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-26 19:45:27 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-26 19:45:27 UTC] Opening application at: https://www.instagram.com/
+[2026-10-26 19:45:29 UTC] [PASSED] Step 1 finished in 1781ms
+[2026-10-26 19:45:29 UTC] [RUNNING] Step 2: Fill input field (action: fill_input)
+[2026-10-26 19:45:29 UTC] Filling input '_r_4_' with value 'lokes_hh_'...
+[2026-10-26 19:45:29 UTC] [PASSED] Step 2 finished in 36ms
+[2026-10-26 19:45:29 UTC] [RUNNING] Step 3: Fill input field (action: fill_input)
+[2026-10-26 19:45:29 UTC] Filling input '_r_7_' with value 'Itachi_123'...
+[2026-10-26 19:45:29 UTC] [PASSED] Step 3 finished in 64ms
+[2026-10-26 19:45:29 UTC] [RUNNING] Step 4: Click element (action: click_element)
+[2026-10-26 19:45:29 UTC] Clicking element 'Log in' (click)...
+[2026-10-26 19:45:29 UTC] [DEBUG] Immediate locator check failed: Ambiguity detected: locator 'role='Log in'' matched 2 visible elements (out of 2 total matching elements). Please specify an accessible role/name, unique label, or more specific selector to avoid unintended actions.
+[2026-10-26 19:45:29 UTC] Successfully clicked 'Log in' via fast interactive DOM resolver.
+[2026-10-26 19:45:29 UTC] [PASSED] Step 4 finished in 450ms
+[2026-10-26 19:45:30 UTC] Video saved and registered: recording.webm
+[2026-10-26 19:45:30 UTC] Workflow execution completed with status: PASSED
+[2026-10-26 19:45:30 UTC] Summary: 4/4 passed, 0 failed, 0 skipped.

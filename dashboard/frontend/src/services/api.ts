@@ -6,7 +6,7 @@ export const API_BASE_URL =
 async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
-  retries: number = 2, timeoutMs: number = 12000,
+  retries: number = 2, timeoutMs: number = 35000,
 ): Promise<T> {
   const isFormData =
     typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -937,6 +937,29 @@ export async function listDiscoveredElements(
   return apiRequest<DiscoveredElement[]>(url);
 }
 
+export async function deleteDiscoveredElement(
+  projectId: string,
+  elementId: string
+): Promise<void> {
+  return apiRequest<void>(
+    `/api/projects/${encodeURIComponent(projectId)}/elements/${encodeURIComponent(elementId)}`,
+    { method: 'DELETE' }
+  );
+}
+
+export async function clearDiscoveredElements(
+  projectId: string,
+  pageUrl?: string
+): Promise<{ status: string; deleted_count: number }> {
+  let url = `/api/projects/${encodeURIComponent(projectId)}/elements`;
+  if (pageUrl) {
+    url += `?page_url=${encodeURIComponent(pageUrl)}`;
+  }
+  return apiRequest<{ status: string; deleted_count: number }>(url, {
+    method: 'DELETE',
+  });
+}
+
 
 // ---------------------------------------------------------------------------
 // Phase 1.2: Visible Browser Session & Visual Element Picker APIs
@@ -955,6 +978,8 @@ export interface BrowserStatus {
   picker_active?: boolean;
   authenticated?: boolean;
   last_active_seconds_ago?: number;
+  browser_type?: string;
+  is_error_page?: boolean;
   error?: string;
 }
 
@@ -984,14 +1009,61 @@ export interface SaveSelectedElementPayload {
 export async function startInspectorBrowser(
   projectId: string,
   visible = true,
-  withLogin = true
+  withLogin = true,
+  browserType = "chromium",
+  url?: string
 ): Promise<BrowserStatus> {
   return apiRequest<BrowserStatus>(
     `/api/inspector/${encodeURIComponent(projectId)}/start-browser`,
     {
       method: "POST",
-      body: JSON.stringify({ visible, with_login: withLogin }),
-    }
+      body: JSON.stringify({
+        visible,
+        with_login: withLogin,
+        browser: browserType,
+        url: url || undefined,
+      }),
+    },
+    0,
+    45000
+  );
+}
+
+export async function navigateInspectorBrowser(
+  projectId: string,
+  url: string,
+  saveAsDefault = false,
+  browserType = "chromium"
+): Promise<BrowserStatus> {
+  return apiRequest<BrowserStatus>(
+    `/api/inspector/${encodeURIComponent(projectId)}/navigate`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        url,
+        save_as_default: saveAsDefault,
+        browser: browserType,
+      }),
+    },
+    0,
+    45000
+  );
+}
+
+export async function captureActivePageFromDashboard(
+  projectId: string
+): Promise<{
+  project_id: string;
+  page_url: string;
+  page_name: string;
+  total_scanned: number;
+  elements: DiscoveredElement[];
+}> {
+  return apiRequest(
+    `/api/inspector/${encodeURIComponent(projectId)}/capture-page`,
+    { method: "POST" },
+    0,
+    45000
   );
 }
 

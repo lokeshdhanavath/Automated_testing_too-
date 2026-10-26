@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import sys
 import time
 from typing import Any, Dict, List, Optional
 import uuid
@@ -377,19 +378,25 @@ DOM_SCANNER_SCRIPT = """() => {
         let locatorValue = customLocatorValue || '';
 
         if (!locatorValue) {
-            if (id && !id.startsWith('a-') && !id.startsWith('B') && id.length < 35) {
+            if (id && !id.startsWith('a-') && id.length < 50) {
                 locatorStrategy = 'id';
                 locatorValue = id;
             } else if (customName && id) {
                 locatorStrategy = 'id';
                 locatorValue = id;
-            } else if (inDialog && text && text.length <= 35) {
+            } else if (inDialog && text && text.length <= 40) {
                 // Scope locator to dialog container
                 locatorStrategy = 'css';
-                const dTag = parentDialog.tagName.toLowerCase();
-                const dClass = parentDialog.className ? parentDialog.className.split(' ').filter(c => c && !c.includes(':'))[0] : '';
-                const dPrefix = dClass ? `.${dClass}` : dTag;
-                locatorValue = `${dPrefix} >> text="${text}"`;
+                let dPrefix = '';
+                if (parentDialog) {
+                    const dTag = (parentDialog.tagName || 'div').toLowerCase();
+                    let dClass = '';
+                    if (typeof parentDialog.className === 'string') {
+                        dClass = parentDialog.className.split(' ').filter(c => c && !c.includes(':') && !c.includes('ui-widget'))[0] || '';
+                    }
+                    dPrefix = dClass ? `.${dClass}` : dTag;
+                }
+                locatorValue = dPrefix ? `${dPrefix} >> text="${text}"` : `text="${text}"`;
             } else if (el.classList.contains('hours-input')) {
                 const allHours = Array.from(document.querySelectorAll('.hours-input'));
                 const idx = allHours.indexOf(el);
@@ -410,7 +417,7 @@ DOM_SCANNER_SCRIPT = """() => {
             } else if (text && text.length <= 35 && !text.includes('\\n')) {
                 locatorStrategy = 'text';
                 locatorValue = text;
-            } else if (id && !id.startsWith('a-') && !id.startsWith('B') && id.length < 35) {
+            } else if (id && !id.startsWith('a-') && id.length < 50) {
                 locatorStrategy = 'id';
                 locatorValue = id;
             } else if (name) {
@@ -556,18 +563,25 @@ def redact_sensitive_url(url: str) -> str:
 
 # In-Browser Floating Capture Dock and Element Picker script (injected into target application browser)
 INPAGE_CAPTURE_DOCK_SCRIPT = """(() => {
-    const projectId = window.__VERIQON_PROJECT_ID__ || '';
-    if (!projectId) return;
+    function initVeriqonDock() {
+        const projectId = window.__VERIQON_PROJECT_ID__ || '';
+        if (!projectId) return;
 
-    if (document.getElementById('veriqon-inpage-dock')) {
-        return;
-    }
+        const isChildFrame = (window !== window.top);
 
-    // Styles for Dock, Toasts, Highlighting, and Modal
-    if (!document.getElementById('veriqon-inpage-styles')) {
-        const style = document.createElement('style');
-        style.id = 'veriqon-inpage-styles';
-        style.textContent = `
+        if (!isChildFrame && document.getElementById('veriqon-inpage-dock')) {
+            return;
+        }
+
+        if (!document.body) {
+            return;
+        }
+
+        // Styles for Dock, Toasts, Highlighting, and Modal
+        if (!document.getElementById('veriqon-inpage-styles')) {
+            const style = document.createElement('style');
+            style.id = 'veriqon-inpage-styles';
+            style.textContent = `
             #veriqon-inpage-dock {
                 position: fixed;
                 top: 18px;
@@ -810,28 +824,99 @@ INPAGE_CAPTURE_DOCK_SCRIPT = """(() => {
         document.head.appendChild(style);
     }
 
-    // Build the dock HTML
-    const dock = document.createElement('div');
-    dock.id = 'veriqon-inpage-dock';
-    dock.innerHTML = `
-        <div class="vq-dock-header" id="vq-dock-drag-header">
-            <div class="vq-dock-brand">
-                <span>⚡ Veriqon Capture</span>
+    // Build the dock HTML (only on top frame)
+    let dock = null;
+    if (!isChildFrame) {
+        dock = document.createElement('div');
+        dock.id = 'veriqon-inpage-dock';
+        dock.innerHTML = `
+            <div class="vq-dock-header" id="vq-dock-drag-header">
+                <div class="vq-dock-brand">
+                    <span>⚡ Veriqon Capture</span>
+                </div>
+                <div class="vq-dock-actions">
+                    <button class="vq-dock-ctrl-btn" id="vq-dock-min-btn" title="Minimize / Expand">_</button>
+                </div>
             </div>
-            <div class="vq-dock-actions">
-                <button class="vq-dock-ctrl-btn" id="vq-dock-min-btn" title="Minimize / Expand">_</button>
+            <div class="vq-dock-body" id="vq-dock-body">
+                <button class="vq-dock-btn vq-dock-btn-primary" id="vq-btn-capture-page">
+                    📸 Capture This Page
+                </button>
+                <button class="vq-dock-btn vq-dock-btn-secondary" id="vq-btn-capture-element">
+                    🎯 Capture Any Element
+                </button>
             </div>
-        </div>
-        <div class="vq-dock-body" id="vq-dock-body">
-            <button class="vq-dock-btn vq-dock-btn-primary" id="vq-btn-capture-page">
-                📸 Capture This Page
-            </button>
-            <button class="vq-dock-btn vq-dock-btn-secondary" id="vq-btn-capture-element">
-                🎯 Capture Any Element
-            </button>
-        </div>
-    `;
-    document.body.appendChild(dock);
+        `;
+        document.body.appendChild(dock);
+
+        // Draggable header
+        const header = document.getElementById('vq-dock-drag-header');
+        let isDragging = false;
+        let startX = 0, startY = 0, startLeft = 0, startTop = 0;
+        if (header) {
+            header.addEventListener('mousedown', (e) => {
+                if (e.target.id === 'vq-dock-min-btn') return;
+                isDragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                const rect = dock.getBoundingClientRect();
+                startLeft = rect.left;
+                startTop = rect.top;
+                dock.style.right = 'auto';
+                dock.style.left = startLeft + 'px';
+                dock.style.top = startTop + 'px';
+            });
+            document.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                dock.style.left = Math.max(10, Math.min(window.innerWidth - 100, startLeft + dx)) + 'px';
+                dock.style.top = Math.max(10, Math.min(window.innerHeight - 50, startTop + dy)) + 'px';
+            });
+            document.addEventListener('mouseup', () => { isDragging = false; });
+        }
+
+        // Minimize button
+        const minBtn = document.getElementById('vq-dock-min-btn');
+        if (minBtn) {
+            minBtn.addEventListener('click', () => {
+                dock.classList.toggle('vq-minimized');
+                minBtn.innerText = dock.classList.contains('vq-minimized') ? '□' : '_';
+            });
+        }
+
+        // Capture Page button
+        const capturePageBtn = document.getElementById('vq-btn-capture-page');
+        if (capturePageBtn) {
+            capturePageBtn.addEventListener('click', async () => {
+                capturePageBtn.innerText = '⏳ Capturing page...';
+                capturePageBtn.disabled = true;
+                try {
+                    let data;
+                    if (typeof window.__veriqon_native_capture__ === 'function') {
+                        data = await window.__veriqon_native_capture__(projectId);
+                    } else {
+                        const resp = await fetch(`http://127.0.0.1:8000/api/inspector/${encodeURIComponent(projectId)}/capture-page`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        data = await resp.json();
+                    }
+                    if (data && (data.total_scanned !== undefined || data.elements)) {
+                        const total = data.total_scanned !== undefined ? data.total_scanned : (data.elements ? data.elements.length : 0);
+                        showToast(`✓ Captured ${total} elements (including open modal dialogs)!`);
+                    } else {
+                        showToast(`Capture failed: ${data && data.detail ? data.detail : 'Unknown error'}`, true);
+                    }
+                } catch (err) {
+                    showToast(`Capture failed: ${err.message}`, true);
+                } finally {
+                    capturePageBtn.innerText = '📸 Capture This Page';
+                    capturePageBtn.disabled = false;
+                }
+            });
+        }
+    }
 
     function showToast(text, isError = false) {
         const existing = document.getElementById('vq-inpage-toast');
@@ -847,62 +932,6 @@ INPAGE_CAPTURE_DOCK_SCRIPT = """(() => {
         document.body.appendChild(toast);
         setTimeout(() => { if (toast.parentNode) toast.remove(); }, 3500);
     }
-
-    // Draggable header
-    const header = document.getElementById('vq-dock-drag-header');
-    let isDragging = false;
-    let startX = 0, startY = 0, startLeft = 0, startTop = 0;
-    header.addEventListener('mousedown', (e) => {
-        if (e.target.id === 'vq-dock-min-btn') return;
-        isDragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
-        const rect = dock.getBoundingClientRect();
-        startLeft = rect.left;
-        startTop = rect.top;
-        dock.style.right = 'auto';
-        dock.style.left = startLeft + 'px';
-        dock.style.top = startTop + 'px';
-    });
-    document.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        dock.style.left = Math.max(10, Math.min(window.innerWidth - 100, startLeft + dx)) + 'px';
-        dock.style.top = Math.max(10, Math.min(window.innerHeight - 50, startTop + dy)) + 'px';
-    });
-    document.addEventListener('mouseup', () => { isDragging = false; });
-
-    // Minimize button
-    const minBtn = document.getElementById('vq-dock-min-btn');
-    minBtn.addEventListener('click', () => {
-        dock.classList.toggle('vq-minimized');
-        minBtn.innerText = dock.classList.contains('vq-minimized') ? '□' : '_';
-    });
-
-    // Capture Page button
-    const capturePageBtn = document.getElementById('vq-btn-capture-page');
-    capturePageBtn.addEventListener('click', async () => {
-        capturePageBtn.innerText = '⏳ Capturing page...';
-        capturePageBtn.disabled = true;
-        try {
-            const resp = await fetch(`http://127.0.0.1:8000/api/inspector/${encodeURIComponent(projectId)}/capture-page`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            });
-            const data = await resp.json();
-            if (resp.ok) {
-                showToast(`✓ Captured ${data.total_scanned} elements on "${data.page_name || 'This Page'}"!`);
-            } else {
-                showToast(`Capture failed: ${data.detail || 'Unknown error'}`, true);
-            }
-        } catch (err) {
-            showToast(`Capture failed: ${err.message}`, true);
-        } finally {
-            capturePageBtn.innerText = '📸 Capture This Page';
-            capturePageBtn.disabled = false;
-        }
-    });
 
     // Element Picker mode setup
     let overlay = document.getElementById('veriqon-picker-overlay');
@@ -1106,28 +1135,56 @@ INPAGE_CAPTURE_DOCK_SCRIPT = """(() => {
         pickerActive = false;
         window.__VERIQON_PICKER_ACTIVE__ = false;
         window.__VERIQON_PICKER_STATUS__ = "idle";
-        captureElemBtn.innerText = '🎯 Capture Any Element';
-        captureElemBtn.classList.remove('active-picking');
-        overlay.style.display = 'none';
-        badge.style.display = 'none';
+        if (captureElemBtn) {
+            captureElemBtn.innerText = '🎯 Capture Any Element';
+            captureElemBtn.classList.remove('active-picking');
+        }
+        if (overlay) overlay.style.display = 'none';
+        if (badge) badge.style.display = 'none';
+
+        // Also stop in child iframes
+        try {
+            document.querySelectorAll('iframe').forEach(f => {
+                try {
+                    if (f.contentWindow && typeof f.contentWindow.__VERIQON_REMOVE_PICKER__ === 'function') {
+                        f.contentWindow.__VERIQON_REMOVE_PICKER__();
+                    }
+                } catch(e) {}
+            });
+        } catch(e) {}
     }
 
     function startPicker() {
         pickerActive = true;
         window.__VERIQON_PICKER_ACTIVE__ = true;
         window.__VERIQON_PICKER_STATUS__ = "picking";
-        captureElemBtn.innerText = '✕ Cancel Selection';
-        captureElemBtn.classList.add('active-picking');
-        showToast('🎯 Click any element on the page to capture it');
+        if (captureElemBtn) {
+            captureElemBtn.innerText = '✕ Cancel Selection';
+            captureElemBtn.classList.add('active-picking');
+        }
+        showToast('🎯 Click any element or modal dialog control to capture it');
+
+        // Also propagate to child iframes (Oracle APEX modal pages)
+        try {
+            document.querySelectorAll('iframe').forEach(f => {
+                try {
+                    if (f.contentWindow && typeof f.contentWindow.__VERIQON_START_PICKER__ === 'function') {
+                        f.contentWindow.__VERIQON_START_PICKER__();
+                    }
+                } catch(e) {}
+            });
+        } catch(e) {}
     }
 
-    captureElemBtn.addEventListener('click', () => {
-        if (pickerActive) {
-            stopPicker();
-        } else {
-            startPicker();
-        }
-    });
+    if (captureElemBtn) {
+        captureElemBtn.addEventListener('click', () => {
+            if (pickerActive) {
+                stopPicker();
+            } else {
+                startPicker();
+            }
+        });
+    }
 
     document.addEventListener('mousemove', (e) => {
         if (!pickerActive) return;
@@ -1176,9 +1233,36 @@ INPAGE_CAPTURE_DOCK_SCRIPT = """(() => {
         if (!target) return;
 
         const meta = extractMetadata(target);
+        if (isChildFrame) {
+            meta.in_dialog = true;
+            meta.dialog_title = document.title || 'Modal Dialog';
+            try {
+                meta.page_url = window.top.location.href;
+                meta.page_title = window.top.document.title;
+            } catch(e) {}
+            if (meta.locator_strategy === 'id') {
+                meta.locator_strategy = 'css';
+                meta.locator_value = `iframe >> #${meta.locator_value}`;
+            } else if (meta.locator_strategy === 'css') {
+                meta.locator_value = `iframe >> ${meta.locator_value}`;
+            } else if (meta.locator_strategy === 'text') {
+                meta.locator_strategy = 'css';
+                meta.locator_value = `iframe >> text="${meta.locator_value}"`;
+            }
+        }
+
         window.__VERIQON_PICKER_RESULT__ = meta;
         window.__VERIQON_PICKER_STATUS__ = "selected";
         stopPicker();
+
+        if (isChildFrame) {
+            try {
+                if (window.top && typeof window.top.__VERIQON_OPEN_MODAL__ === 'function') {
+                    window.top.__VERIQON_OPEN_MODAL__(meta);
+                    return;
+                }
+            } catch(e) {}
+        }
         openNamingModal(meta);
     }, true);
 
@@ -1261,17 +1345,47 @@ INPAGE_CAPTURE_DOCK_SCRIPT = """(() => {
             saveBtn.disabled = true;
 
             try {
-                const resp = await fetch(`http://127.0.0.1:8000/api/inspector/${encodeURIComponent(projectId)}/save-selected-element`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const resData = await resp.json();
-                if (resp.ok) {
-                    closeModal();
-                    showToast(`✓ Saved element "${mappedName}"!`);
+                let resData;
+                let ok = true;
+                if (typeof window.__veriqon_native_save_element__ === 'function') {
+                    resData = await window.__veriqon_native_save_element__(payload);
                 } else {
-                    showToast(`Save failed: ${resData.detail || 'Error'}`, true);
+                    const resp = await fetch(`http://127.0.0.1:8000/api/inspector/${encodeURIComponent(projectId)}/save-selected-element`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    ok = resp.ok;
+                    resData = await resp.json();
+                }
+                if (ok && resData && !resData.detail) {
+                    saveBtn.innerText = '✓ Saved Successfully!';
+                    saveBtn.style.background = '#059669';
+                    saveBtn.style.color = '#ffffff';
+
+                    const modalBox = document.getElementById('veriqon-element-modal');
+                    if (modalBox) {
+                        const successAlert = document.createElement('div');
+                        successAlert.id = 'vq-modal-success-banner';
+                        successAlert.style.marginTop = '12px';
+                        successAlert.style.padding = '10px 14px';
+                        successAlert.style.background = 'rgba(16, 185, 129, 0.2)';
+                        successAlert.style.border = '1px solid #10b981';
+                        successAlert.style.borderRadius = '8px';
+                        successAlert.style.color = '#34d399';
+                        successAlert.style.fontWeight = '700';
+                        successAlert.style.fontSize = '13px';
+                        successAlert.style.textAlign = 'center';
+                        successAlert.innerHTML = `✓ Saved Successfully!<div style="font-size:11px; font-weight:normal; color:#a7f3d0; margin-top:3px;">"${mappedName}" added to application catalog</div>`;
+                        modalBox.appendChild(successAlert);
+                    }
+
+                    showToast(`✓ Saved successfully: "${mappedName}"!`);
+                    setTimeout(() => {
+                        closeModal();
+                    }, 850);
+                } else {
+                    showToast(`Save failed: ${resData?.detail || 'Error'}`, true);
                     saveBtn.innerText = 'Save Element';
                     saveBtn.disabled = false;
                 }
@@ -1291,6 +1405,26 @@ INPAGE_CAPTURE_DOCK_SCRIPT = """(() => {
 
     window.__VERIQON_REMOVE_PICKER__ = stopPicker;
     window.__VERIQON_START_PICKER__ = startPicker;
+    window.__VERIQON_OPEN_MODAL__ = openNamingModal;
+    } // closes initVeriqonDock
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initVeriqonDock, { once: true });
+    } else {
+        initVeriqonDock();
+    }
+
+    // Keep dock alive on Oracle APEX and SPA page transitions with zero delay
+    try {
+        const _vqObserver = new MutationObserver(() => {
+            if (!document.getElementById('veriqon-inpage-dock') && document.body) {
+                initVeriqonDock();
+            }
+        });
+        if (document.documentElement) {
+            _vqObserver.observe(document.documentElement, { childList: true, subtree: true });
+        }
+    } catch (_e) {}
 })();"""
 
 PICKER_INJECTION_SCRIPT = INPAGE_CAPTURE_DOCK_SCRIPT
@@ -1307,8 +1441,26 @@ class InspectorEngine:
         self.pw: Optional[Playwright] = None
         self.browser: Optional[Browser] = None
         self.headed_browser: Optional[Browser] = None
+        self.headed_browsers: Dict[str, Browser] = {}
         self.sessions: Dict[str, Dict[str, Any]] = {}
         self._ready_event = asyncio.Event()
+
+    def _find_session(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Resolves the live active browser session by project_id, project_name, or active fallback."""
+        if project_id and project_id in self.sessions:
+            s = self.sessions[project_id]
+            if s.get("page") and not s["page"].is_closed():
+                return s
+
+        for k, s in self.sessions.items():
+            if (k == project_id or s.get("project_id") == project_id or s.get("project_name") == project_id) and s.get("page") and not s["page"].is_closed():
+                return s
+
+        # If there is only one active browser session in memory, bind to it
+        active_list = [s for s in self.sessions.values() if s.get("page") and not s["page"].is_closed()]
+        if len(active_list) == 1:
+            return active_list[0]
+        return None
 
     def _start_worker(self):
         import threading
@@ -1316,8 +1468,11 @@ class InspectorEngine:
             return
 
         def _worker_loop():
-            # Force Windows ProactorEventLoop in this thread for full subprocess support
-            self._loop = asyncio.ProactorEventLoop()
+            # Use Windows ProactorEventLoop where available, otherwise standard event loop
+            if sys.platform == "win32" and hasattr(asyncio, "ProactorEventLoop"):
+                self._loop = asyncio.ProactorEventLoop()
+            else:
+                self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
             self._loop.run_until_complete(self._init_playwright())
             self._loop.run_forever()
@@ -1338,13 +1493,70 @@ class InspectorEngine:
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
         )
 
-    async def get_headed_browser(self) -> Browser:
-        if self.headed_browser is None or not self.headed_browser.is_connected():
-            self.headed_browser = await self.pw.chromium.launch(
-                headless=False,
-                args=["--no-sandbox", "--disable-dev-shm-usage"]
-            )
-        return self.headed_browser
+    async def get_headed_browser(self, browser_name: str = "chromium") -> Browser:
+        b_name = (browser_name or "chromium").lower().strip()
+
+        # Support connecting directly to an existing running Chrome browser (Option B - CDP)
+        if b_name in ("cdp", "chrome-cdp", "existing-chrome"):
+            try:
+                current_b = await self.pw.chromium.connect_over_cdp("http://127.0.0.1:9222")
+                logger.info("Connected to existing Chrome instance over CDP (port 9222)")
+                self.headed_browsers[b_name] = current_b
+                self.headed_browser = current_b
+                return current_b
+            except Exception as e:
+                logger.warning(f"Could not connect to existing Chrome over CDP port 9222 ({e}). Launching standard browser.")
+
+        current_b = self.headed_browsers.get(b_name)
+        if current_b is None or not current_b.is_connected():
+            stealth_args = [
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--no-default-browser-check",
+            ]
+            if b_name in ("chrome", "google-chrome"):
+                try:
+                    current_b = await self.pw.chromium.launch(
+                        headless=False,
+                        channel="chrome",
+                        args=stealth_args
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to launch Chrome channel ({e}), falling back to chromium")
+                    current_b = await self.pw.chromium.launch(
+                        headless=False,
+                        args=stealth_args
+                    )
+            elif b_name == "firefox":
+                try:
+                    current_b = await self.pw.firefox.launch(headless=False)
+                except Exception as e:
+                    logger.warning(f"Failed to launch Firefox ({e}), falling back to chromium")
+                    current_b = await self.pw.chromium.launch(headless=False, args=stealth_args)
+            elif b_name == "webkit":
+                try:
+                    current_b = await self.pw.webkit.launch(headless=False)
+                except Exception as e:
+                    logger.warning(f"Failed to launch WebKit ({e}), falling back to chromium")
+                    current_b = await self.pw.chromium.launch(headless=False, args=stealth_args)
+            elif b_name in ("msedge", "edge"):
+                try:
+                    current_b = await self.pw.chromium.launch(
+                        headless=False,
+                        channel="msedge",
+                        args=stealth_args
+                    )
+                except Exception:
+                    current_b = await self.pw.chromium.launch(headless=False, args=stealth_args)
+            else:
+                current_b = await self.pw.chromium.launch(
+                    headless=False,
+                    args=stealth_args
+                )
+            self.headed_browsers[b_name] = current_b
+            self.headed_browser = current_b
+        return current_b
 
     def run_task(self, coro_func, *args, **kwargs):
         """Dispatches an async coroutine to the Proactor worker thread and waits synchronously for result."""
@@ -1438,8 +1650,19 @@ class InspectorEngine:
                     except Exception:
                         pass
                     
+                    # If Oracle Cloud displays its transitional "Can't connect / Retry" screen, auto-click Retry!
+                    if "can't connect" in cur_title:
+                        try:
+                            retry_btn = page.locator('button:has-text("Retry")').first
+                            if await retry_btn.count() > 0:
+                                await retry_btn.click()
+                                await page.wait_for_timeout(1000)
+                                continue
+                        except Exception:
+                            pass
+
                     on_login = any(x in cur_url for x in ("/login", "/signin", "oauth2/v1/authorize"))
-                    is_transitional = cur_title.startswith("loading ") or cur_title == ""
+                    is_transitional = cur_title.startswith("loading ") or cur_title == "" or "can't connect" in cur_title
                     if not on_login and not is_transitional:
                         break
 
@@ -1978,10 +2201,12 @@ class InspectorEngine:
         secret: str = "",
         with_login: bool = True,
         visible: bool = True,
+        browser_type: str = "chromium",
     ) -> Dict[str, Any]:
         self._cleanup_expired_sessions()
         base_url = normalize_app_url(base_url)
         session = self.sessions.get(project_id)
+        browser_type = (browser_type or "chromium").lower().strip()
 
         dock_init = f"""(() => {{
             window.__VERIQON_PROJECT_ID__ = "{project_id}";
@@ -1989,9 +2214,9 @@ class InspectorEngine:
         }})();
         """ + INPAGE_CAPTURE_DOCK_SCRIPT
 
-        # If session already open with same visibility mode, bring to front
+        # If session already open with same visibility and browser type, bring to front
         if session and not session["page"].is_closed():
-            if session.get("visible", False) != visible:
+            if session.get("visible", False) != visible or session.get("browser_type", "chromium") != browser_type:
                 try:
                     await session["page"].close()
                 except Exception:
@@ -2009,17 +2234,47 @@ class InspectorEngine:
 
         # Launch fresh context & page
         if visible:
-            browser = await self.get_headed_browser()
-            context = await browser.new_context(
-                viewport={"width": 1440, "height": 900},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-            )
+            browser = await self.get_headed_browser(browser_type)
+            context_args = {"viewport": {"width": 1440, "height": 900}}
+            if browser_type in ("chromium", "chrome"):
+                context_args["user_agent"] = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+            context = await browser.new_context(**context_args)
             await context.add_init_script(dock_init)
+
+            # Expose native Python bridge functions to JavaScript (no Mixed Content / CORS issues)
+            async def _native_capture_fn(_pid=project_id):
+                try:
+                    return await self.capture_current_page(project_id, project_name, base_url, username, secret)
+                except Exception as exc:
+                    logger.error(f"Error in _native_capture_fn: {exc}", exc_info=True)
+                    return {"detail": str(exc), "error": True}
+
+            async def _native_save_fn(payload_dict):
+                try:
+                    logger.info(f"Native save element received: {payload_dict.get('friendly_name')}")
+                    try:
+                        from dashboard.backend.app.database import SessionLocal
+                    except ImportError:
+                        from app.database import SessionLocal
+                    with SessionLocal() as db_session:
+                        res = save_selected_element_internal(project_id, payload_dict, db_session)
+                        logger.info(f"Native save result: {res.get('friendly_name')}")
+                        return res
+                except Exception as exc:
+                    logger.error(f"Error in _native_save_fn: {exc}", exc_info=True)
+                    return {"detail": str(exc), "error": True}
+
+            try:
+                await context.expose_function("__veriqon_native_capture__", _native_capture_fn)
+                await context.expose_function("__veriqon_native_save_element__", _native_save_fn)
+            except Exception as e:
+                logger.warning(f"Could not expose native functions: {e}")
+
             page = await context.new_page()
         else:
             page = await self.browser.new_page(
                 viewport={"width": 1440, "height": 900},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
             )
 
         # Register session immediately so browser is tracked and observable
@@ -2029,35 +2284,88 @@ class InspectorEngine:
             "project_name": project_name,
             "page": page,
             "base_url": base_url,
+            "browser_type": browser_type,
             "authenticated": False,
             "visible": visible,
             "created_at": time.time(),
             "last_active": time.time(),
             "picker_active": False,
             "selected_element": None,
+            "username": username,
+            "secret": secret,
         }
         self.sessions[project_id] = session
 
         authenticated = False
+        nav_error = None
         try:
-            await page.goto(base_url, wait_until="domcontentloaded", timeout=35000)
+            # Generous 30s timeout so Oracle Cloud and slow networks have time to resolve and redirect
+            await page.goto(base_url, wait_until="commit", timeout=30000)
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+
             if with_login and username and secret:
                 authenticated = await self._login_if_needed(page, username, secret)
             await self._expand_nav(page)
-            # Ensure floating dock is evaluated on page
             try:
                 await page.evaluate(dock_init)
             except Exception:
                 pass
         except Exception as e:
-            logger.warning(f"Error during browser navigation: {e}")
+            nav_error = str(e)
+            logger.warning(f"Browser navigation to '{base_url}' warning/error: {e}")
+            # Keep the real browser on the current page; never overwrite with fake error screens
 
         session["authenticated"] = authenticated
         session["last_active"] = time.time()
         return await self.get_browser_status(project_id)
 
+    async def navigate_browser(self, project_id: str, new_url: str) -> Dict[str, Any]:
+        session = self._find_session(project_id)
+        if not session or session["page"].is_closed():
+            raise RuntimeError(f"No active browser session for application '{project_id}'.")
+        page: Page = session["page"]
+        clean = normalize_app_url(new_url.strip())
+        session["last_active"] = time.time()
+        project_name = session.get("project_name", project_id)
+        dock_init = f"""(() => {{
+            window.__VERIQON_PROJECT_ID__ = "{project_id}";
+            window.__VERIQON_PROJECT_NAME__ = "{project_name}";
+        }})();
+        """ + INPAGE_CAPTURE_DOCK_SCRIPT
+
+        try:
+            # 30s timeout to let live Oracle APEX sessions load cleanly
+            await page.goto(clean, wait_until="commit", timeout=30000)
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=15000)
+            except Exception:
+                pass
+
+            # If navigation redirected to login, attempt login with stored credentials
+            u = session.get("username", "")
+            s = session.get("secret", "")
+            if u and s:
+                try:
+                    await self._login_if_needed(page, u, s)
+                except Exception as exc:
+                    logger.warning(f"Auto-login on navigation: {exc}")
+
+            await self._expand_nav(page)
+            try:
+                await page.evaluate(dock_init)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f"Error navigating to {clean}: {e}")
+            # Do NOT overwrite page with fallback HTML - preserve the user's live browser state
+
+        return await self.get_browser_status(project_id)
+
     async def get_browser_status(self, project_id: str) -> Dict[str, Any]:
-        session = self.sessions.get(project_id)
+        session = self._find_session(project_id)
         if not session or session["page"].is_closed():
             return {
                 "active": False,
@@ -2071,33 +2379,38 @@ class InspectorEngine:
                 "page_name": "",
                 "picker_active": False,
                 "authenticated": False,
+                "browser_type": "chromium",
+                "is_error_page": False,
                 "last_active_seconds_ago": 0,
             }
         page = session["page"]
-        raw_url = page.url
+        raw_url = page.url or ""
         try:
             page_title = await page.title()
         except Exception:
             page_title = ""
         clean_url, page_name = clean_page_identity(raw_url, page_title)
         display_url = redact_sensitive_url(raw_url)
+        is_error = raw_url.startswith("chrome-error://") or (raw_url == "about:blank" and not page.is_closed())
         return {
             "active": True,
             "visible": session.get("visible", False),
             "project_id": project_id,
             "session_id": session.get("session_id", ""),
-            "current_url": clean_url,
+            "current_url": raw_url,
             "clean_url": clean_url,
             "display_url": display_url,
             "page_title": page_title,
             "page_name": page_name,
             "picker_active": session.get("picker_active", False),
             "authenticated": session.get("authenticated", False),
+            "browser_type": session.get("browser_type", "chromium"),
+            "is_error_page": is_error,
             "last_active_seconds_ago": round(time.time() - session.get("last_active", time.time()), 1),
         }
 
     async def start_picker(self, project_id: str) -> Dict[str, Any]:
-        session = self.sessions.get(project_id)
+        session = self._find_session(project_id)
         if not session or session["page"].is_closed():
             raise RuntimeError("No active browser session found for this application. Please open the browser first.")
         page: Page = session["page"]
@@ -2106,13 +2419,17 @@ class InspectorEngine:
         session["selected_element"] = None
         await page.evaluate(PICKER_INJECTION_SCRIPT)
         try:
+            await page.evaluate("() => { if (typeof window.__VERIQON_START_PICKER__ === 'function') window.__VERIQON_START_PICKER__(); }")
+        except Exception:
+            pass
+        try:
             await page.bring_to_front()
         except Exception:
             pass
         return {"status": "picking", "active": True}
 
     async def get_picker_status(self, project_id: str) -> Dict[str, Any]:
-        session = self.sessions.get(project_id)
+        session = self._find_session(project_id)
         if not session or session["page"].is_closed():
             return {"status": "idle", "active": False, "element": None}
         page: Page = session["page"]
@@ -2130,7 +2447,7 @@ class InspectorEngine:
             return {"status": "idle", "active": False, "element": None, "error": str(e)}
 
     async def cancel_picker(self, project_id: str) -> Dict[str, Any]:
-        session = self.sessions.get(project_id)
+        session = self._find_session(project_id)
         if session and not session["page"].is_closed():
             try:
                 await session["page"].evaluate("() => { if (window.__VERIQON_REMOVE_PICKER__) window.__VERIQON_REMOVE_PICKER__(); }")
@@ -2148,25 +2465,19 @@ class InspectorEngine:
         username: str = "",
         secret: str = "",
     ) -> Dict[str, Any]:
-        session = self.sessions.get(project_id)
+        session = self._find_session(project_id)
         if not session or session["page"].is_closed():
-            return await self.inspect(
-                project_id=project_id,
-                project_name=project_name,
-                base_url=base_url,
-                target_url=base_url,
-                viewport={"width": 1440, "height": 900},
-                username=username,
-                secret=secret,
-                with_login=True,
-                force_refresh=False,
-                preserve_state=True,
-            )
+            raise RuntimeError("No active browser window is open. Please launch your browser first using 'Open in Browser'.")
 
         page: Page = session["page"]
         session["last_active"] = time.time()
 
-        scan_res = await page.evaluate(DOM_SCANNER_SCRIPT)
+        try:
+            scan_res = await page.evaluate(DOM_SCANNER_SCRIPT)
+        except Exception as e:
+            logger.warning(f"Error evaluating DOM scanner on main frame: {e}")
+            scan_res = {}
+
         if isinstance(scan_res, dict):
             raw_elements = scan_res.get("elements", [])
             has_open_dialog = scan_res.get("has_open_dialog", False)
@@ -2177,33 +2488,56 @@ class InspectorEngine:
             active_dialog_title = ""
 
         # Scan child frames (e.g. APEX modal dialog pages inside iframes)
-        if len(page.frames) > 1:
-            for frame in page.frames:
-                if frame == page.main_frame:
-                    continue
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            try:
+                frame_title = ""
                 try:
-                    f_res = await frame.evaluate(DOM_SCANNER_SCRIPT)
-                    if isinstance(f_res, dict):
-                        f_elems = f_res.get("elements", [])
-                        if f_res.get("has_open_dialog"):
-                            has_open_dialog = True
-                    else:
-                        f_elems = f_res or []
-                    for fe in f_elems:
-                        fe["in_dialog"] = True
-                        fe["dialog_title"] = fe.get("dialog_title") or f"IFrame: {frame.name or 'modal'}"
-                        fe["frame_name"] = frame.name
-                        fe["frame_url"] = frame.url
-                        raw_elements.append(fe)
+                    frame_title = await frame.title()
                 except Exception:
                     pass
+                f_res = await frame.evaluate(DOM_SCANNER_SCRIPT)
+                if isinstance(f_res, dict):
+                    f_elems = f_res.get("elements", [])
+                    if f_elems:
+                        has_open_dialog = True
+                else:
+                    f_elems = f_res or []
+
+                dlg_title = frame_title or f"Modal Dialog ({frame.name or 'iframe'})"
+                for fe in f_elems:
+                    fe["in_dialog"] = True
+                    fe["dialog_title"] = fe.get("dialog_title") or dlg_title
+                    fe["frame_name"] = frame.name
+                    fe["frame_url"] = frame.url
+                    # Scope locators into the iframe so Playwright can click them reliably
+                    strat = fe.get("locator_strategy")
+                    val = fe.get("locator_value")
+                    if strat == "id":
+                        fe["locator_strategy"] = "css"
+                        fe["locator_value"] = f"iframe >> #{val}"
+                    elif strat == "css":
+                        fe["locator_value"] = f"iframe >> {val}"
+                    elif strat == "text":
+                        fe["locator_strategy"] = "css"
+                        fe["locator_value"] = f'iframe >> text="{val}"'
+                    raw_elements.append(fe)
+            except Exception as e:
+                logger.warning(f"Error scanning child frame: {e}")
+
+        page_title = ""
+        try:
+            page_title = await page.title()
+        except Exception:
+            page_title = ""
 
         return {
             "project_id": project_id,
             "project_name": project_name,
             "session_id": session.get("session_id", ""),
             "page_url": page.url,
-            "page_title": await page.title(),
+            "page_title": page_title,
             "elements": raw_elements,
             "has_open_dialog": has_open_dialog,
             "active_dialog_title": active_dialog_title,
@@ -2478,6 +2812,14 @@ def close_inspector_session(project_id: str):
 class StartBrowserRequest(BaseModel):
     visible: bool = True
     with_login: bool = True
+    browser: Optional[str] = "chromium"
+    url: Optional[str] = None
+
+
+class NavigateRequest(BaseModel):
+    url: str
+    save_as_default: bool = False
+    browser: Optional[str] = None
 
 
 class SaveSelectedElementRequest(BaseModel):
@@ -2510,15 +2852,19 @@ def start_browser_session(
 ):
     """
     Launches a real interactive browser window (or headless session) for the application.
-    Reuses saved credentials via credentials_service without exposing them.
+    Supports Chromium, Chrome, Firefox, and WebKit engines with custom URL overrides.
     """
     project = db_service.resolve_project(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Application '{project_id}' not found.")
 
-    base_url = normalize_app_url((project.get("base_url") or "").rstrip("/"))
-    if not base_url:
+    default_base = (project.get("base_url") or "").rstrip("/")
+    target_url = (payload.url.strip() if payload.url and payload.url.strip() else default_base)
+    target_url = normalize_app_url(target_url)
+    if not target_url:
         raise HTTPException(status_code=400, detail="Application does not have a configured base URL.")
+
+    target_browser = (payload.browser or project.get("browser") or "chromium").lower()
 
     username = ""
     secret = ""
@@ -2536,16 +2882,70 @@ def start_browser_session(
             _inspector_engine.start_browser,
             project_id=project_id,
             project_name=project.get("name", project_id),
-            base_url=base_url,
+            base_url=target_url,
             username=username,
             secret=secret,
             with_login=payload.with_login,
             visible=payload.visible,
+            browser_type=target_browser,
         )
     except Exception as exc:
         logger.error(f"Error starting browser for '{project_id}': {exc}", exc_info=True)
         err_msg = str(exc) or type(exc).__name__
         raise HTTPException(status_code=500, detail=f"Unable to start browser: {err_msg}")
+
+
+@router.post("/{project_id}/navigate")
+def navigate_browser_to_url(
+    project_id: str,
+    payload: NavigateRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Navigates the active browser session to a new URL, or opens the browser at the new URL if not currently running.
+    Optionally persists the new URL as the application's base URL in the database.
+    """
+    project = db_service.resolve_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Application '{project_id}' not found.")
+
+    clean_url = payload.url.strip()
+    if not clean_url:
+        raise HTTPException(status_code=400, detail="Target URL cannot be empty.")
+
+    clean_url = normalize_app_url(clean_url)
+    session = _inspector_engine.sessions.get(project_id)
+
+    if not session or session["page"].is_closed():
+        # Browser is not open yet; start it directly at this new URL
+        target_browser = (payload.browser or project.get("browser") or "chromium").lower()
+        res = _inspector_engine.run_task(
+            _inspector_engine.start_browser,
+            project_id=project_id,
+            project_name=project.get("name", project_id),
+            base_url=clean_url,
+            visible=True,
+            browser_type=target_browser,
+        )
+    else:
+        try:
+            res = _inspector_engine.run_task(
+                _inspector_engine.navigate_browser,
+                project_id=project_id,
+                new_url=clean_url,
+            )
+        except Exception as exc:
+            logger.warning(f"Navigation warning: {exc}")
+            res = _inspector_engine.run_task(_inspector_engine.get_browser_status, project_id)
+
+    if payload.save_as_default:
+        db.execute(
+            text("UPDATE projects SET base_url = :url, updated_at = NOW() WHERE external_id = :pid"),
+            {"url": clean_url, "pid": project_id},
+        )
+        db.commit()
+
+    return res
 
 
 @router.get("/{project_id}/browser-status")
@@ -2568,6 +2968,8 @@ def get_browser_session_status(project_id: str):
             "page_name": "",
             "picker_active": False,
             "authenticated": False,
+            "browser_type": "chromium",
+            "is_error_page": False,
             "error": str(exc),
         }
 
@@ -2608,16 +3010,11 @@ def cancel_element_picker(project_id: str):
         return {"status": "idle", "active": False, "error": str(exc)}
 
 
-@router.post("/{project_id}/save-selected-element")
-def save_selected_element(
+def save_selected_element_internal(
     project_id: str,
-    payload: SaveSelectedElementRequest,
-    db: Session = Depends(get_db),
-):
-    """
-    Saves an individually picked element to the app_elements catalog after user confirmation.
-    Cleans up any active browser overlay.
-    """
+    payload_dict: Dict[str, Any],
+    db: Session,
+) -> Dict[str, Any]:
     project = db_service.resolve_project(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Application '{project_id}' not found.")
@@ -2627,35 +3024,44 @@ def save_selected_element(
     except (ValueError, KeyError):
         raise HTTPException(status_code=500, detail="Invalid project ID format.")
 
-    clean_url, fallback_page_name = clean_page_identity(payload.page_url, payload.page_name or "")
-    page_name = payload.page_name or fallback_page_name
+    raw_page_url = payload_dict.get("page_url", "")
+    page_name_in = payload_dict.get("page_name") or ""
+    clean_url, fallback_page_name = clean_page_identity(raw_page_url, page_name_in)
+    page_name = page_name_in or fallback_page_name
     now = datetime.utcnow()
 
+    category = payload_dict.get("category", "other")
+    tag_name = payload_dict.get("tag_name", "")
+
     # Never persist password field values
-    if payload.category == "input" and "password" in (payload.tag_name or "").lower():
+    if category == "input" and "password" in (tag_name or "").lower():
         raise HTTPException(status_code=400, detail="Password elements cannot be saved.")
+
+    locator_strategy = payload_dict.get("locator_strategy", "")
+    locator_value = payload_dict.get("locator_value", "")
+    friendly_name = payload_dict.get("friendly_name") or "Element"
 
     existing = (
         db.query(AppElement)
         .filter(
             AppElement.project_id == proj_uuid,
             AppElement.page_url == clean_url,
-            AppElement.locator_strategy == payload.locator_strategy,
-            AppElement.locator_value == payload.locator_value,
+            AppElement.locator_strategy == locator_strategy,
+            AppElement.locator_value == locator_value,
         )
         .first()
     )
 
     if existing:
-        existing.friendly_name = payload.friendly_name
-        existing.description = payload.description or ""
-        existing.category = payload.category
-        existing.tag_name = payload.tag_name
-        existing.role = payload.role
-        existing.label = payload.label
-        existing.placeholder = payload.placeholder
-        existing.in_dialog = payload.in_dialog
-        existing.dialog_title = payload.dialog_title
+        existing.friendly_name = friendly_name
+        existing.description = payload_dict.get("description") or ""
+        existing.category = category
+        existing.tag_name = tag_name
+        existing.role = payload_dict.get("role")
+        existing.label = payload_dict.get("label")
+        existing.placeholder = payload_dict.get("placeholder")
+        existing.in_dialog = bool(payload_dict.get("in_dialog", False))
+        existing.dialog_title = payload_dict.get("dialog_title")
         existing.page_name = page_name
         existing.last_verified_at = now
         saved_element = existing
@@ -2664,17 +3070,17 @@ def save_selected_element(
             id=uuid.uuid4(),
             project_id=proj_uuid,
             page_url=clean_url,
-            friendly_name=payload.friendly_name,
-            description=payload.description or "",
-            category=payload.category,
-            tag_name=payload.tag_name,
-            role=payload.role,
-            label=payload.label,
-            placeholder=payload.placeholder,
-            locator_strategy=payload.locator_strategy,
-            locator_value=payload.locator_value,
-            in_dialog=payload.in_dialog,
-            dialog_title=payload.dialog_title,
+            friendly_name=friendly_name,
+            description=payload_dict.get("description") or "",
+            category=category,
+            tag_name=tag_name,
+            role=payload_dict.get("role"),
+            label=payload_dict.get("label"),
+            placeholder=payload_dict.get("placeholder"),
+            locator_strategy=locator_strategy,
+            locator_value=locator_value,
+            in_dialog=bool(payload_dict.get("in_dialog", False)),
+            dialog_title=payload_dict.get("dialog_title"),
             page_name=page_name,
             discovered_at=now,
             last_verified_at=now,
@@ -2690,11 +3096,10 @@ def save_selected_element(
         logger.error(f"Failed to persist selected element: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Database save failed: {str(exc)}")
 
-    # Clean up picker overlays in browser session
-    try:
-        _inspector_engine.run_task(_inspector_engine.cancel_picker, project_id)
-    except Exception:
-        pass
+    # Mark picker inactive in session safely without deadlocking the worker loop
+    session = _inspector_engine._find_session(project_id)
+    if session:
+        session["picker_active"] = False
 
     return {
         "id": str(saved_element.id),
@@ -2714,6 +3119,19 @@ def save_selected_element(
         "dialog_title": saved_element.dialog_title,
         "discovered_at": saved_element.discovered_at.isoformat() if saved_element.discovered_at else None,
     }
+
+
+@router.post("/{project_id}/save-selected-element")
+def save_selected_element(
+    project_id: str,
+    payload: SaveSelectedElementRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Saves an individually picked element to the app_elements catalog after user confirmation.
+    Cleans up any active browser overlay.
+    """
+    return save_selected_element_internal(project_id, payload.model_dump(), db)
 
 
 @router.post("/{project_id}/capture-page")
@@ -2762,6 +3180,12 @@ def capture_active_page(
     raw_page_url: str = data.get("page_url", base_url)
     page_title: str = data.get("page_title", "")
     page_url, page_name = clean_page_identity(raw_page_url, page_title)
+
+    if raw_page_url.startswith("chrome-error://") or raw_page_url == "about:blank":
+        raise HTTPException(
+            status_code=400,
+            detail="The browser is currently on an unreachable error page. Please enter a valid URL in the navigation bar to visit and capture your application.",
+        )
 
     try:
         proj_uuid = uuid.UUID(str(project["id"]))

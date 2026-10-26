@@ -1,0 +1,30 @@
+[2026-10-26 18:34:03 UTC] Starting execution for: 'new Workflow' (Run ID: bf91887c-e80d-42b7-b877-ae7697f66065)
+[2026-10-26 18:34:03 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application/login
+[2026-10-26 18:34:03 UTC] Browser: chromium (Headless: True)
+[2026-10-26 18:34:03 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-26 18:34:08 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-26 18:34:08 UTC] Opening application at: https://oracleapex.com/ords/r/lokesh354/timesheet-application/login/
+[2026-10-26 18:34:11 UTC] [PASSED] Step 1 finished in 2816ms
+[2026-10-26 18:34:11 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-26 18:34:11 UTC] Entering username for account 'lokesh' into login form...
+[2026-10-26 18:34:11 UTC] Entering encrypted vault password into password field...
+[2026-10-26 18:34:11 UTC] Submitting login form...
+[2026-10-26 18:34:14 UTC] Navigation menu toggle is collapsed (aria-expanded='false'). Expanding via #t_Button_navControl...
+[2026-10-26 18:34:15 UTC] [PASSED] Step 2 finished in 3398ms
+[2026-10-26 18:34:15 UTC] [RUNNING] Step 3: Click element (action: click_element)
+[2026-10-26 18:34:15 UTC] Clicking element 'Whereabouts' (click)...
+[2026-10-26 18:34:15 UTC] Successfully clicked 'Whereabouts' via fast interactive DOM resolver.
+[2026-10-26 18:34:15 UTC] [PASSED] Step 3 finished in 431ms
+[2026-10-26 18:34:15 UTC] [RUNNING] Step 4: Click element (action: click_element)
+[2026-10-26 18:34:15 UTC] Clicking element 'fc-dom-66' (click)...
+[2026-10-26 18:34:16 UTC] [PASSED] Step 4 finished in 923ms
+[2026-10-26 18:34:16 UTC] [RUNNING] Step 5: Wait for element (action: wait_for_element)
+[2026-10-26 18:34:16 UTC] Waiting for element 'Full Day' to reach state 'visible' (timeout: 5000ms)...
+[2026-10-26 18:34:16 UTC] [PASSED] Step 5 finished in 5ms
+[2026-10-26 18:34:16 UTC] [RUNNING] Step 6: Select dropdown option (action: select_option)
+[2026-10-26 18:34:16 UTC] [ERROR] Step 6 failed: Must provide an option label or value to select.
+[2026-10-26 18:34:16 UTC] Failure screenshot captured: failure_step_6.png
+[2026-10-26 18:34:16 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-26 18:34:18 UTC] Video saved and registered: recording.webm
+[2026-10-26 18:34:18 UTC] Workflow execution completed with status: FAILED
+[2026-10-26 18:34:18 UTC] Summary: 5/6 passed, 1 failed, 0 skipped.

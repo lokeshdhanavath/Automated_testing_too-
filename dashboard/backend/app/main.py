@@ -21,7 +21,7 @@ for p in (BACKEND_DIR, ROOT_DIR):
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -497,6 +497,319 @@ def health():
         "status": "ok",
         "application": "Veriqon Automated Testing Platform API",
     }
+
+
+# ---------------------------------------------------------
+# Built-in High-Fidelity APEX Timesheet Application (Demo / Fallback)
+# ---------------------------------------------------------
+
+DEMO_LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Timesheet Application - Log In</title>
+  <style>
+    body {
+      margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: #0f172a; display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    }
+    .login-card {
+      background: #ffffff; border-radius: 12px; padding: 40px; width: 100%; max-width: 420px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+    }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .brand-icon { width: 40px; height: 40px; background: #0284c7; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 20px; }
+    h1 { font-size: 22px; font-weight: 700; margin: 0; color: #0f172a; }
+    p.subtitle { color: #64748b; font-size: 14px; margin: 4px 0 24px 0; }
+    .form-group { margin-bottom: 20px; text-align: left; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #334155; margin-bottom: 6px; }
+    input[type="text"], input[type="password"] {
+      width: 100%; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; box-sizing: border-box; transition: border-color 0.15s;
+    }
+    input:focus { outline: none; border-color: #0284c7; box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15); }
+    .btn-submit {
+      width: 100%; padding: 12px; background: #0284c7; color: white; border: none; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.15s; margin-top: 10px;
+    }
+    .btn-submit:hover { background: #0369a1; }
+    .badge-demo { background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; display: inline-block; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="brand">
+      <div class="brand-icon">Ω</div>
+      <div>
+        <h1>Oracle APEX</h1>
+        <div class="badge-demo">Timesheet Application (Live Demo)</div>
+      </div>
+    </div>
+    <form action="/demo/timesheet" method="GET">
+      <div class="form-group">
+        <label for="P9999_USERNAME">Username</label>
+        <input id="P9999_USERNAME" name="username" type="text" value="lokesh" required placeholder="Enter username" />
+      </div>
+      <div class="form-group">
+        <label for="P9999_PASSWORD">Password</label>
+        <input id="P9999_PASSWORD" name="password" type="password" value="demo123" required placeholder="Enter password" />
+      </div>
+      <button type="submit" class="btn-submit" id="B_SIGN_IN">Sign In</button>
+    </form>
+  </div>
+</body>
+</html>"""
+
+DEMO_TIMESHEET_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Timesheet Application - My Timesheet</title>
+  <style>
+    body {
+      margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f8fafc; color: #0f172a;
+    }
+    header {
+      background: #0f172a; color: white; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .header-left { display: flex; align-items: center; gap: 16px; }
+    #t_Button_navControl {
+      background: transparent; border: 1px solid #334155; color: white; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 16px;
+    }
+    .breadcrumb { font-size: 15px; font-weight: 600; color: #e2e8f0; }
+    .main-container { padding: 24px; max-width: 1400px; margin: 0 auto; }
+    .toolbar {
+      background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 20px; margin-bottom: 20px;
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    }
+    .week-nav { display: flex; align-items: center; gap: 8px; }
+    .btn {
+      padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid #cbd5e1; background: white; color: #334155;
+    }
+    .btn:hover { background: #f1f5f9; }
+    .btn-primary { background: #0284c7; border-color: #0284c7; color: white; }
+    .btn-primary:hover { background: #0369a1; }
+    .btn-danger { color: #dc2626; border-color: #fecaca; }
+    .btn-danger:hover { background: #fef2f2; }
+    .grid-container {
+      background: white; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    table.timesheet-grid {
+      width: 100%; border-collapse: collapse; text-align: left;
+    }
+    table.timesheet-grid th, table.timesheet-grid td {
+      padding: 12px 14px; border-bottom: 1px solid #e2e8f0; font-size: 14px;
+    }
+    table.timesheet-grid th { background: #f1f5f9; font-weight: 600; color: #475569; }
+    .hours-input {
+      width: 60px; padding: 6px; border: 1px solid #cbd5e1; border-radius: 4px; text-align: center; font-size: 14px;
+    }
+    .hours-input:focus { outline: none; border-color: #0284c7; }
+    .summary-row td { background: #f8fafc; font-weight: 700; color: #0f172a; }
+    .weekly-total-badge {
+      background: #e0f2fe; color: #0369a1; padding: 6px 14px; border-radius: 20px; font-weight: 700; font-size: 15px;
+    }
+    /* Modal Dialog */
+    .dialog-backdrop {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;
+    }
+    .dialog-box {
+      background: white; border-radius: 8px; width: 440px; max-width: 90%; padding: 24px; box-shadow: 0 20px 25px rgba(0,0,0,0.2);
+    }
+    .dialog-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .dialog-title { font-size: 18px; font-weight: 700; margin: 0; }
+    .dialog-close { background: none; border: none; font-size: 20px; cursor: pointer; color: #64748b; }
+    .project-option {
+      padding: 12px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 8px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;
+    }
+    .project-option:hover { background: #f0f9ff; border-color: #38bdf8; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <button id="t_Button_navControl" title="Toggle Navigation">☰</button>
+      <span class="breadcrumb">My Timesheet (Oracle APEX Application)</span>
+      <a class="a-TreeView-label" href="/demo/timesheet" style="color: #38bdf8; text-decoration: none; font-size: 13px;">Timesheet Home</a>
+    </div>
+    <div style="font-size: 13px; color: #94a3b8;">User: lokesh (Authenticated)</div>
+  </header>
+
+  <div class="main-container">
+    <div class="toolbar">
+      <div class="week-nav">
+        <button id="p4-previous" class="btn" onclick="shiftWeek(-1)">‹ Previous Week</button>
+        <button id="p4-current" class="btn btn-primary" onclick="setWeekToday()">Current Week (20-Oct-26 to 26-Oct-26)</button>
+        <button id="p4-next" class="btn" onclick="shiftWeek(1)">Next Week ›</button>
+      </div>
+
+      <div style="display: flex; gap: 8px;">
+        <button id="add_project_btn" class="btn btn-primary" onclick="openAddProjectDialog()">+ Add Project</button>
+        <button id="save" class="btn" style="background:#10b981; color:white; border-color:#10b981;" onclick="saveTimesheet()">💾 Save Timesheet</button>
+        <button id="delete_project_btn" class="btn btn-danger" onclick="deleteLastRow()">🗑️ Delete Row</button>
+      </div>
+    </div>
+
+    <div class="grid-container">
+      <table class="timesheet-grid">
+        <thead>
+          <tr>
+            <th style="width: 280px;">Project Name</th>
+            <th style="width: 180px;">Task</th>
+            <th>Mon</th><th>Tue</th><th>Wed</th><th>Thu</th><th>Fri</th><th>Sat</th><th>Sun</th>
+            <th style="width: 100px;">Total</th>
+          </tr>
+        </thead>
+        <tbody id="timesheet-rows">
+          <tr class="grid-row">
+            <td class="project-name-cell"><strong class="project-name">PRJ-101: Timesheet Modernization</strong></td>
+            <td>Full-Stack Testing</td>
+            <td class="hour-cell"><input class="hours-input" type="text" value="8" oninput="recalculateTotals()" /></td>
+            <td class="hour-cell"><input class="hours-input" type="text" value="8" oninput="recalculateTotals()" /></td>
+            <td class="hour-cell"><input class="hours-input" type="text" value="8" oninput="recalculateTotals()" /></td>
+            <td class="hour-cell"><input class="hours-input" type="text" value="8" oninput="recalculateTotals()" /></td>
+            <td class="hour-cell"><input class="hours-input" type="text" value="8" oninput="recalculateTotals()" /></td>
+            <td class="hour-cell"><input class="hours-input" type="text" value="0" oninput="recalculateTotals()" /></td>
+            <td class="hour-cell"><input class="hours-input" type="text" value="0" oninput="recalculateTotals()" /></td>
+            <td class="project-total" style="font-weight: 700;">40.0</td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr class="summary-row">
+            <td colspan="2" class="daily-total-label">Daily Totals:</td>
+            <td id="mon_total">8.0</td>
+            <td id="tue_total">8.0</td>
+            <td id="wed_total">8.0</td>
+            <td id="thu_total">8.0</td>
+            <td id="fri_total">8.0</td>
+            <td id="sat_total">0.0</td>
+            <td id="sun_total">0.0</td>
+            <td><span class="weekly-total-badge" id="weekly_total">40.0</span></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+
+  <!-- Add Project Dialog -->
+  <div id="add-project-dialog" class="dialog-backdrop">
+    <div class="dialog-box">
+      <div class="dialog-header">
+        <div>
+          <h2 class="dialog-title">Select Project</h2>
+          <div style="font-size: 13px; color: #64748b;">Choose a project assigned to you</div>
+        </div>
+        <button class="dialog-close" onclick="closeAddProjectDialog()">✕</button>
+      </div>
+      <div id="project-options-list">
+        <div class="project-option" onclick="selectProject('PRJ-202: Oracle APEX Cloud Integration')">
+          <strong>PRJ-202: Oracle APEX Cloud Integration</strong>
+          <span>›</span>
+        </div>
+        <div class="project-option" onclick="selectProject('PRJ-305: Automated Test Platform Rollout')">
+          <strong>PRJ-305: Automated Test Platform Rollout</strong>
+          <span>›</span>
+        </div>
+        <div class="project-option" onclick="selectProject('PRJ-409: Security Compliance & Fernet Vault')">
+          <strong>PRJ-409: Security Compliance & Fernet Vault</strong>
+          <span>›</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function recalculateTotals() {
+      const rows = document.querySelectorAll("#timesheet-rows tr");
+      const dayTotals = [0, 0, 0, 0, 0, 0, 0];
+      let grandTotal = 0;
+
+      rows.forEach(row => {
+        const inputs = row.querySelectorAll(".hours-input");
+        let rowSum = 0;
+        inputs.forEach((inp, idx) => {
+          let val = parseFloat(inp.value) || 0;
+          if (val > 24) { val = 0; inp.value = ""; }
+          if (val < 0) { val = 0; inp.value = ""; }
+          rowSum += val;
+          dayTotals[idx] += val;
+        });
+        const totalCell = row.querySelector(".project-total");
+        if (totalCell) totalCell.innerText = rowSum.toFixed(1);
+        grandTotal += rowSum;
+      });
+
+      const dayIds = ["mon_total", "tue_total", "wed_total", "thu_total", "fri_total", "sat_total", "sun_total"];
+      dayIds.forEach((id, idx) => {
+        const el = document.getElementById(id);
+        if (el) el.innerText = dayTotals[idx].toFixed(1);
+      });
+
+      const weeklyBadge = document.getElementById("weekly_total");
+      if (weeklyBadge) weeklyBadge.innerText = grandTotal.toFixed(1);
+    }
+
+    function openAddProjectDialog() {
+      document.getElementById("add-project-dialog").style.display = "flex";
+    }
+
+    function closeAddProjectDialog() {
+      document.getElementById("add-project-dialog").style.display = "none";
+    }
+
+    function selectProject(name) {
+      const tbody = document.getElementById("timesheet-rows");
+      const tr = document.createElement("tr");
+      tr.className = "grid-row";
+      tr.innerHTML = `
+        <td class="project-name-cell"><strong class="project-name">${name}</strong></td>
+        <td>Engineering</td>
+        <td class="hour-cell"><input class="hours-input" type="text" value="0" oninput="recalculateTotals()" /></td>
+        <td class="hour-cell"><input class="hours-input" type="text" value="0" oninput="recalculateTotals()" /></td>
+        <td class="hour-cell"><input class="hours-input" type="text" value="0" oninput="recalculateTotals()" /></td>
+        <td class="hour-cell"><input class="hours-input" type="text" value="0" oninput="recalculateTotals()" /></td>
+        <td class="hour-cell"><input class="hours-input" type="text" value="0" oninput="recalculateTotals()" /></td>
+        <td class="hour-cell"><input class="hours-input" type="text" value="0" oninput="recalculateTotals()" /></td>
+        <td class="hour-cell"><input class="hours-input" type="text" value="0" oninput="recalculateTotals()" /></td>
+        <td class="project-total" style="font-weight: 700;">0.0</td>
+      `;
+      tbody.appendChild(tr);
+      closeAddProjectDialog();
+      recalculateTotals();
+    }
+
+    function deleteLastRow() {
+      const tbody = document.getElementById("timesheet-rows");
+      if (tbody.children.length > 1) {
+        tbody.removeChild(tbody.lastElementChild);
+        recalculateTotals();
+      }
+    }
+
+    function shiftWeek(offset) {
+      const currentBtn = document.getElementById("p4-current");
+      if (offset < 0) currentBtn.innerText = "Previous Week (13-Oct-26 to 19-Oct-26)";
+      else currentBtn.innerText = "Next Week (27-Oct-26 to 02-Nov-26)";
+    }
+
+    function setWeekToday() {
+      document.getElementById("p4-current").innerText = "Current Week (20-Oct-26 to 26-Oct-26)";
+    }
+
+    function saveTimesheet() {
+      alert("✓ Timesheet saved successfully!");
+    }
+  </script>
+</body>
+</html>"""
+
+@app.get("/demo/login", response_class=HTMLResponse)
+def demo_login_page():
+    return HTMLResponse(content=DEMO_LOGIN_HTML)
+
+@app.get("/demo/timesheet", response_class=HTMLResponse)
+def demo_timesheet_page():
+    return HTMLResponse(content=DEMO_TIMESHEET_HTML)
 
 
 # ---------------------------------------------------------

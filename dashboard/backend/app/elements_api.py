@@ -150,6 +150,25 @@ def delete_element(
     db.commit()
 
 
+@router.delete("", summary="Delete elements (all or by page_url)")
+def clear_elements(
+    project_id: str,
+    page_url: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Delete all captured elements for a project, optionally filtered by page_url."""
+    project = _resolve_project(db, project_id)
+    pid = UUID(str(project["id"]))
+
+    q = db.query(AppElement).filter(AppElement.project_id == pid)
+    if page_url and isinstance(page_url, str):
+        q = q.filter(AppElement.page_url == page_url)
+
+    count = q.delete(synchronize_session=False)
+    db.commit()
+    return {"status": "ok", "deleted_count": count}
+
+
 # Alias router for /api/elements/{project_id} compatibility
 elements_alias_router = APIRouter(
     prefix="/api/elements",
@@ -173,4 +192,22 @@ def list_captured_pages_compat(
     db: Session = Depends(get_db),
 ) -> list[dict]:
     return list_captured_pages(project_id=project_id, db=db)
+
+
+@elements_alias_router.delete("/{project_id}", summary="Delete elements (compat alias)")
+def clear_elements_compat(
+    project_id: str,
+    page_url: Optional[str] = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    return clear_elements(project_id=project_id, page_url=page_url, db=db)
+
+
+@elements_alias_router.delete("/{project_id}/{element_id}", status_code=204, summary="Delete element (compat alias)")
+def delete_element_compat(
+    project_id: str,
+    element_id: UUID,
+    db: Session = Depends(get_db),
+) -> None:
+    return delete_element(project_id=project_id, element_id=element_id, db=db)
 

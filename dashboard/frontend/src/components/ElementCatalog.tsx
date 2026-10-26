@@ -1,8 +1,16 @@
 import React, { useEffect, useState } from "react";
 import {
+  Trash2,
+  Camera,
+  Crosshair,
+} from "lucide-react";
+import {
   listDiscoveredElements,
   listCapturedPages,
   discoverElements,
+  deleteDiscoveredElement,
+  clearDiscoveredElements,
+  startElementPicker,
   type DiscoveredElement,
   type CapturedPage,
   type ScenarioStep,
@@ -56,6 +64,7 @@ export const ElementCatalog: React.FC<ElementCatalogProps> = ({
   const [selectedAction, setSelectedAction] = useState<string>("click_element");
   const [actionValue, setActionValue] = useState<string>("");
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [actionSavedSuccessfully, setActionSavedSuccessfully] = useState(false);
 
   // Initial load
   useEffect(() => {
@@ -119,6 +128,64 @@ export const ElementCatalog: React.FC<ElementCatalogProps> = ({
       setError(err?.message || "Capture failed. Is the browser inspection session active?");
     } finally {
       setCapturing(false);
+    }
+  }
+
+  async function handleDeleteElement(el: DiscoveredElement, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!window.confirm(`Delete "${el.friendly_name}" from captured elements?`)) return;
+    try {
+      await deleteDiscoveredElement(projectId, el.id);
+      setElements((prev) => prev.filter((item) => item.id !== el.id));
+      setPages((prev) =>
+        prev.map((p) =>
+          p.page_url === el.page_url
+            ? { ...p, element_count: Math.max(0, p.element_count - 1) }
+            : p
+        )
+      );
+    } catch (err: any) {
+      setError(err?.message || "Failed to delete element.");
+    }
+  }
+
+  async function handleDeletePage(pageUrl: string, pageName: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!window.confirm(`Delete all captured elements for page "${pageName}"?`)) return;
+    try {
+      await clearDiscoveredElements(projectId, pageUrl);
+      setPages((prev) => prev.filter((p) => p.page_url !== pageUrl));
+      if (selectedPageUrl === pageUrl) {
+        setSelectedPageUrl(null);
+        setElements([]);
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to delete elements for this page.");
+    }
+  }
+
+  async function handleClearAll() {
+    if (!window.confirm("Are you sure you want to delete ALL captured elements across all pages?")) return;
+    try {
+      await clearDiscoveredElements(projectId);
+      setPages([]);
+      setSelectedPageUrl(null);
+      setElements([]);
+      setCaptureMessage("All captured elements have been deleted.");
+      setTimeout(() => setCaptureMessage(null), 3500);
+    } catch (err: any) {
+      setError(err?.message || "Failed to clear elements.");
+    }
+  }
+
+  async function handleStartPicker() {
+    setError(null);
+    try {
+      await startElementPicker(projectId);
+      setCaptureMessage("🎯 Element Picker activated in your browser! Click any element to capture it.");
+      setTimeout(() => setCaptureMessage(null), 6000);
+    } catch (err: any) {
+      setError(err?.message || "Could not activate element picker. Ensure browser is open.");
     }
   }
 
@@ -190,15 +257,18 @@ export const ElementCatalog: React.FC<ElementCatalogProps> = ({
       },
     };
 
-    if (onAddActionToWorkflow) {
-      onAddActionToWorkflow(newStep);
-      setActionSuccessMsg(`Added action to workflow: ${desc}`);
-      setTimeout(() => setActionSuccessMsg(null), 4000);
-    } else if (onSelectElement) {
-      onSelectElement(configElement);
-    }
-
-    setConfigElement(null);
+    setActionSavedSuccessfully(true);
+    setTimeout(() => {
+      if (onAddActionToWorkflow) {
+        onAddActionToWorkflow(newStep);
+        setActionSuccessMsg(`✓ Saved successfully: ${desc}`);
+        setTimeout(() => setActionSuccessMsg(null), 4000);
+      } else if (onSelectElement) {
+        onSelectElement(configElement);
+      }
+      setConfigElement(null);
+      setActionSavedSuccessfully(false);
+    }, 600);
   }
 
   // Render the core catalog interface
@@ -267,30 +337,57 @@ export const ElementCatalog: React.FC<ElementCatalogProps> = ({
             </button>
           </div>
 
-          {/* Capture Current Page Button */}
-          <button
-            type="button"
-            onClick={() => void handleCapturePage()}
-            disabled={capturing}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              padding: "9px 14px",
-              borderRadius: 8,
-              border: "none",
-              background: capturing ? "var(--v-surface-3, #2e3347)" : "var(--v-accent, #6366f1)",
-              color: "#ffffff",
-              fontSize: "0.82rem",
-              fontWeight: 700,
-              cursor: capturing ? "not-allowed" : "pointer",
-              boxShadow: "0 2px 8px rgba(99,102,241,0.35)",
-              transition: "all 0.15s ease",
-            }}
-          >
-            <span>{capturing ? "⏳ Capturing Page..." : "📷 Capture This Page"}</span>
-          </button>
+          {/* Capture Actions (Whole Page scan + Interactive Picker) */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <button
+              type="button"
+              onClick={() => void handleCapturePage()}
+              disabled={capturing}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "none",
+                background: capturing ? "var(--v-surface-3, #2e3347)" : "var(--v-accent, #6366f1)",
+                color: "#ffffff",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                cursor: capturing ? "not-allowed" : "pointer",
+                boxShadow: "0 2px 8px rgba(99,102,241,0.35)",
+                transition: "all 0.15s ease",
+              }}
+            >
+              <Camera size={15} />
+              <span>{capturing ? "Scanning Page..." : "Capture Active Page"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleStartPicker()}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid rgba(6, 182, 212, 0.4)",
+                background: "rgba(6, 182, 212, 0.12)",
+                color: "#22d3ee",
+                fontSize: "0.8rem",
+                fontWeight: 700,
+                cursor: "pointer",
+                transition: "all 0.15s ease",
+              }}
+              title="Click any element in your browser to capture it"
+            >
+              <Crosshair size={15} />
+              <span>Capture Element</span>
+            </button>
+          </div>
         </div>
 
         {/* Pages List */}
@@ -343,18 +440,38 @@ export const ElementCatalog: React.FC<ElementCatalogProps> = ({
                     >
                       {p.page_name}
                     </span>
-                    <span
-                      style={{
-                        fontSize: "0.68rem",
-                        padding: "2px 6px",
-                        borderRadius: 10,
-                        background: isSelected ? "var(--v-accent, #6366f1)" : "var(--v-surface, #252b3b)",
-                        color: isSelected ? "#fff" : "var(--v-text-muted, #8892a4)",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {p.element_count}
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span
+                        style={{
+                          fontSize: "0.68rem",
+                          padding: "2px 6px",
+                          borderRadius: 10,
+                          background: isSelected ? "var(--v-accent, #6366f1)" : "var(--v-surface, #252b3b)",
+                          color: isSelected ? "#fff" : "var(--v-text-muted, #8892a4)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {p.element_count}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => void handleDeletePage(p.page_url, p.page_name, e)}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "var(--v-text-muted, #64748b)",
+                          cursor: "pointer",
+                          padding: "2px 4px",
+                          borderRadius: 4,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          lineHeight: 1,
+                        }}
+                        title={`Delete all captured elements for "${p.page_name}"`}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
                   </div>
                   <div
                     style={{
@@ -408,6 +525,30 @@ export const ElementCatalog: React.FC<ElementCatalogProps> = ({
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {pages.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void handleClearAll()}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  border: "1px solid rgba(239, 68, 68, 0.35)",
+                  background: "rgba(239, 68, 68, 0.1)",
+                  color: "#f87171",
+                  fontSize: "0.76rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+                title="Delete all captured elements across all pages"
+              >
+                <Trash2 size={13} />
+                <span>Clear All</span>
+              </button>
+            )}
+
             {selectedPage && (
               <button
                 type="button"
@@ -668,7 +809,7 @@ export const ElementCatalog: React.FC<ElementCatalogProps> = ({
                     </div>
 
                     {/* Action Buttons */}
-                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0, alignItems: "center" }}>
                       {onAddActionToWorkflow ? (
                         <button
                           type="button"
@@ -705,6 +846,26 @@ export const ElementCatalog: React.FC<ElementCatalogProps> = ({
                           Select
                         </button>
                       )}
+
+                      <button
+                        type="button"
+                        onClick={(e) => void handleDeleteElement(el, e)}
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: 6,
+                          border: "1px solid rgba(239, 68, 68, 0.3)",
+                          background: "rgba(239, 68, 68, 0.1)",
+                          color: "#f87171",
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          transition: "all 0.12s",
+                        }}
+                        title={`Delete "${el.friendly_name}"`}
+                      >
+                        <Trash2 size={13} />
+                      </button>
                     </div>
                   </div>
 
@@ -918,19 +1079,21 @@ export const ElementCatalog: React.FC<ElementCatalogProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmAction}
+                disabled={actionSavedSuccessfully}
                 style={{
                   padding: "7px 18px",
                   borderRadius: 6,
                   border: "none",
-                  background: "var(--v-accent, #6366f1)",
+                  background: actionSavedSuccessfully ? "#059669" : "var(--v-accent, #6366f1)",
                   color: "#ffffff",
                   fontSize: "0.8rem",
                   fontWeight: 700,
-                  cursor: "pointer",
-                  boxShadow: "0 2px 8px rgba(99,102,241,0.35)",
+                  cursor: actionSavedSuccessfully ? "default" : "pointer",
+                  boxShadow: actionSavedSuccessfully ? "0 2px 8px rgba(16,185,129,0.35)" : "0 2px 8px rgba(99,102,241,0.35)",
+                  transition: "all 0.15s ease",
                 }}
               >
-                Add Action to Workflow
+                {actionSavedSuccessfully ? "✓ Saved Successfully!" : "Add Action to Workflow"}
               </button>
             </div>
           </div>

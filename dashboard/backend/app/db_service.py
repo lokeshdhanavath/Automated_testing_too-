@@ -383,7 +383,7 @@ def get_run_details(
             SELECT id, test_id, status, duration_seconds, error_message, created_at
             FROM test_run_results
             WHERE run_id = :rid
-            ORDER BY id ASC
+            ORDER BY created_at ASC, id ASC
         """),
         {"rid": run_uuid},
     ).mappings().all()

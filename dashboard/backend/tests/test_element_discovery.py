@@ -2,6 +2,13 @@
 Integration tests for Veriqon Element Discovery & Catalog Persistence API.
 Phase 1.1: Page-wise element capture, natural friendly names, page-list API.
 """
+import sys
+from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 import pytest
 from app.database import SessionLocal
 from app.inspector_api import discover_and_persist_elements, DiscoverRequest, clean_page_identity

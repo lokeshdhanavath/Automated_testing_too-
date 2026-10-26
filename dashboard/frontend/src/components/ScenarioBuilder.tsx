@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import {
   getProjectScenarios,
+  getScenarioDetails,
   createScenario,
   getProjectCredentials,
   runDynamicWorkflow,
@@ -60,6 +61,8 @@ interface ScenarioBuilderProps {
   onNavigateToCredentials?: () => void;
   onNavigateToApplications?: () => void;
   onNavigateToCapturePage?: () => void;
+  pendingAction?: ScenarioStep | null;
+  onPendingActionConsumed?: () => void;
   onRunTriggered: (runId: string) => void;
   running?: boolean;
   onStopRun?: () => void;
@@ -142,6 +145,8 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
   onNavigateToCredentials,
   onNavigateToApplications,
   onNavigateToCapturePage,
+  pendingAction,
+  onPendingActionConsumed,
   onRunTriggered,
   running = false,
   onStopRun,
@@ -151,41 +156,67 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
   const [credentialsLoading, setCredentialsLoading] = useState(false);
   const [savedWorkflows, setSavedWorkflows] = useState<ScenarioItem[]>([]);
 
-  // Workflow builder state
-  const [workflowName, setWorkflowName] = useState("Dynamic Browser Workflow");
-  const [workflowSteps, setWorkflowSteps] = useState<ScenarioStep[]>([
-    {
-      step_order: 1,
-      action_type: "open_app",
-      description: "Open application base URL",
-      locator_value: "",
-      action_params: {},
-      is_enabled: true,
-    },
-    {
-      step_order: 2,
-      action_type: "login",
-      description: "Login with vault credentials",
-      locator_value: "",
-      action_params: {},
-      is_enabled: true,
-    },
-  ]);
+  // Workflow builder state with lazy initialization from localStorage
+  const [workflowName, setWorkflowName] = useState(() => {
+    try {
+      return localStorage.getItem(`veriqon_name_${projectId}`) || "Dynamic Browser Workflow";
+    } catch {
+      return "Dynamic Browser Workflow";
+    }
+  });
 
-  // Load persisted workflow steps if any
-  useEffect(() => {
+  const [workflowSteps, setWorkflowSteps] = useState<ScenarioStep[]>(() => {
     try {
       const saved = localStorage.getItem(`veriqon_steps_${projectId}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setWorkflowSteps(parsed);
+          return parsed;
         }
       }
     } catch {}
-  }, [projectId]);
+    return [
+      {
+        step_order: 1,
+        action_type: "open_app",
+        description: "Open application base URL",
+        locator_value: "",
+        action_params: {},
+        is_enabled: true,
+      },
+      {
+        step_order: 2,
+        action_type: "login",
+        description: "Login with vault credentials",
+        locator_value: "",
+        action_params: {},
+        is_enabled: true,
+      },
+    ];
+  });
 
-  // Persist workflow steps on changes
+  // Consume any action added from the Capture Page workspace
+  useEffect(() => {
+    if (pendingAction) {
+      setWorkflowSteps((prev) => {
+        const nextOrder = prev.length + 1;
+        const newSteps = [...prev, { ...pendingAction, step_order: nextOrder }];
+        try {
+          localStorage.setItem(`veriqon_steps_${projectId}`, JSON.stringify(newSteps));
+        } catch {}
+        return newSteps;
+      });
+      setStatusMessage({
+        type: "success",
+        text: `Added "${pendingAction.description || pendingAction.action_type}" to workflow!`,
+      });
+      if (onPendingActionConsumed) {
+        onPendingActionConsumed();
+      }
+    }
+  }, [pendingAction, projectId]);
+
+  // Persist workflow steps and name on changes
   useEffect(() => {
     try {
       if (workflowSteps.length > 0) {
@@ -193,6 +224,14 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
       }
     } catch {}
   }, [workflowSteps, projectId]);
+
+  useEffect(() => {
+    try {
+      if (workflowName) {
+        localStorage.setItem(`veriqon_name_${projectId}`, workflowName);
+      }
+    } catch {}
+  }, [workflowName, projectId]);
 
   // Modal / Editing states
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
@@ -610,11 +649,35 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     setStatusMessage({ type: "success", text: "Loaded standard login & verification workflow." });
   }
 
-  function loadSavedWorkflow(scenario: ScenarioItem) {
-    if (scenario.steps && scenario.steps.length > 0) {
-      setWorkflowSteps(scenario.steps);
-      setWorkflowName(scenario.name);
-      setStatusMessage({ type: "success", text: `Loaded saved workflow: "${scenario.name}".` });
+  async function loadSavedWorkflow(scenario: ScenarioItem) {
+    try {
+      let fullScenario = scenario;
+      if (!fullScenario.steps || fullScenario.steps.length === 0) {
+        fullScenario = await getScenarioDetails(scenario.id);
+      }
+      if (fullScenario.steps && fullScenario.steps.length > 0) {
+        const sorted = [...fullScenario.steps].sort((a, b) => a.step_order - b.step_order);
+        setWorkflowSteps(sorted);
+        setWorkflowName(fullScenario.name);
+        try {
+          localStorage.setItem(`veriqon_steps_${projectId}`, JSON.stringify(sorted));
+          localStorage.setItem(`veriqon_name_${projectId}`, fullScenario.name);
+        } catch {}
+        setStatusMessage({
+          type: "success",
+          text: `Loaded saved workflow: "${fullScenario.name}" (${sorted.length} steps).`,
+        });
+      } else {
+        setStatusMessage({
+          type: "error",
+          text: `Saved workflow "${scenario.name}" has no recorded steps.`,
+        });
+      }
+    } catch (err: any) {
+      setStatusMessage({
+        type: "error",
+        text: `Failed to load workflow: ${err?.message || "Error"}`,
+      });
     }
   }
 
@@ -1319,24 +1382,45 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                 {savedWorkflows.map((scen) => (
                   <div
                     key={scen.id}
-                    onClick={() => loadSavedWorkflow(scen)}
+                    onClick={() => void loadSavedWorkflow(scen)}
                     style={{
                       display: "flex",
                       justifyContent: "space-between",
                       alignItems: "center",
-                      padding: "8px 12px",
+                      padding: "10px 14px",
                       borderRadius: 8,
                       border: "1px solid var(--v-border)",
                       background: "var(--v-surface)",
                       cursor: "pointer",
                       transition: "all 0.15s ease",
                     }}
+                    title={`Click to load "${scen.name}" into workflow builder`}
                   >
                     <div>
-                      <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--v-text)" }}>{scen.name}</div>
-                      <div style={{ fontSize: "0.7rem", color: "var(--v-text-muted)" }}>{scen.steps?.length || 0} steps</div>
+                      <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>{scen.name}</div>
+                      <div style={{ fontSize: "0.72rem", color: "var(--v-text-muted)", marginTop: 2 }}>
+                        {scen.step_count ?? scen.steps?.length ?? 0} steps
+                      </div>
                     </div>
-                    <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--v-accent)" }}>Load &rarr;</span>
+                    <button
+                      type="button"
+                      style={{
+                        padding: "5px 12px",
+                        borderRadius: 6,
+                        border: "1px solid var(--v-accent)",
+                        background: "var(--v-accent-light, rgba(99,102,241,0.1))",
+                        color: "var(--v-accent, #818cf8)",
+                        fontSize: "0.75rem",
+                        fontWeight: 700,
+                        cursor: "pointer",
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void loadSavedWorkflow(scen);
+                      }}
+                    >
+                      Load Workflow
+                    </button>
                   </div>
                 ))}
               </div>

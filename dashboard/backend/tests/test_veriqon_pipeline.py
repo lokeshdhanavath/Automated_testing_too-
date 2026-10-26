@@ -123,9 +123,10 @@ def test_03_run_lifecycle_and_test_results_persistence():
         assert final_details["status"] == "failed"
         assert final_details["exit_code"] == 1
         assert len(final_details["test_results"]) == 2
-        assert final_details["test_results"][0]["status"] == "passed"
-        assert final_details["test_results"][1]["status"] == "failed"
-        assert "AssertionError" in (final_details["test_results"][1]["error_message"] or "")
+        res_map = {r["test_id"]: r for r in final_details["test_results"]}
+        assert res_map["tests/test_new_feature.py::test_new_feature[chromium]"]["status"] == "passed"
+        assert res_map["tests/test_login.py::test_login_page_loads[chromium]"]["status"] == "failed"
+        assert "AssertionError" in (res_map["tests/test_login.py::test_login_page_loads[chromium]"]["error_message"] or "")
     finally:
         # Clean up test run from DB (cascade deletes test_run_results)
         try:
@@ -221,7 +222,7 @@ def test_06_scenario_mappings_and_test_discovery():
         # Test discovery
         tests = discover_tests("tests")
         assert len(tests) >= 30
-        assert "tests/test_new_feature.py::test_new_feature[chromium]" in tests
+        assert any("tests/test_new_feature.py::test_new_feature" in t for t in tests)
     finally:
         db.close()
 

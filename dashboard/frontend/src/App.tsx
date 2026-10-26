@@ -173,6 +173,7 @@ export default function App() {
   };
   const [projectForm, setProjectForm] = useState<ProjectPayload>(emptyProjectForm);
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
+  const [pendingWorkflowAction, setPendingWorkflowAction] = useState<ScenarioStep | null>(null);
 
   // CSV scenario upload, validation, and selection state
   const [csvFile, setCsvFile] = useState<File | null>(null);
@@ -1068,14 +1069,17 @@ async function loadTests(projectId?: string) {
             </>
           )}
 
-          {page === "Capture Page" && (
+          <div style={{ display: page === "Capture Page" ? "block" : "none" }}>
             <CapturePageWorkspace
               activeProject={activeProject}
               onNavigateToWorkflow={() => setPage("Workflow Studio")}
+              onAddActionToWorkflow={(step) => {
+                setPendingWorkflowAction(step);
+              }}
             />
-          )}
+          </div>
 
-          {page === "Workflow Studio" && (
+          <div style={{ display: page === "Workflow Studio" ? "block" : "none" }}>
             <ScenarioBuilder
               projectId={activeProjectId}
               projectName={activeProject?.name || "Current Application"}
@@ -1085,6 +1089,8 @@ async function loadTests(projectId?: string) {
               onNavigateToCredentials={() => setPage("Credentials")}
               onNavigateToApplications={() => setPage("Applications")}
               onNavigateToCapturePage={() => setPage("Capture Page")}
+              pendingAction={pendingWorkflowAction}
+              onPendingActionConsumed={() => setPendingWorkflowAction(null)}
               onRunTriggered={(runId) => {
                 setActiveRunId(runId);
                 setRunning(true);
@@ -1096,7 +1102,7 @@ async function loadTests(projectId?: string) {
               running={running}
               onStopRun={() => void handleStopCurrentRun()}
             />
-          )}
+          </div>
 
           {page === "Credentials" && (
             <CredentialsPanel

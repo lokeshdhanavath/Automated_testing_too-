@@ -1,0 +1,13 @@
+[2026-10-26 19:41:28 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: df0d5cae-6d95-42b4-85d5-2583779902c8)
+[2026-10-26 19:41:28 UTC] Target Application: 'Instagram' at https://www.instagram.com
+[2026-10-26 19:41:28 UTC] Browser: chromium (Headless: True)
+[2026-10-26 19:41:28 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-26 19:41:31 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-26 19:41:31 UTC] Opening application at: https://www.instagram.com/
+[2026-10-26 19:41:34 UTC] [PASSED] Step 1 finished in 2227ms
+[2026-10-26 19:41:34 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-26 19:41:34 UTC] [ERROR] Step 2 failed: Could not automatically locate the Login/Submit button. Please specify a submit button locator in the action settings.
+[2026-10-26 19:41:34 UTC] Failure screenshot captured: failure_step_2.png
+[2026-10-26 19:41:34 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-26 19:41:34 UTC] Workflow execution completed with status: FAILED
+[2026-10-26 19:41:34 UTC] Summary: 1/2 passed, 1 failed, 0 skipped.
