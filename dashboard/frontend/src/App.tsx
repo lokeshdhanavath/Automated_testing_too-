@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   CircleAlert,
   Clock3,
+  Crosshair,
   Download,
   ExternalLink,
   Eye,
@@ -48,7 +49,9 @@ import {
   getProjectRuns,
   getProjectArtifacts,
   validateCsvScenarios,
+  parseWorkflowCsv,
   executeCsvScenarios,
+  runDynamicWorkflow,
   getProjects,
   createProject,
   updateProject,
@@ -66,16 +69,19 @@ import type {
   RunRecord,
   TestResultItem,
   StepExecutionResult,
+  ScenarioStep,
 } from "./services/api";
 import { CredentialsPanel } from "./components/CredentialsPanel";
 import { ScenarioBuilder } from "./components/ScenarioBuilder";
 import { ScenarioExecutionView } from "./components/ScenarioExecutionView";
+import { CapturePageWorkspace } from "./components/CapturePageWorkspace";
 import "./App.css";
 
 type Page =
   | "Applications"
   | "Overview"
   | "Workflow Studio"
+  | "Capture Page"
   | "Credentials"
   | "Test Suites"
   | "CSV Scenarios"
@@ -109,7 +115,7 @@ const navigation: {
       { label: "Overview", icon: LayoutDashboard },
       { label: "Applications", icon: FolderKanban },
       { label: "Workflow Studio", icon: Layers },
-      { label: "Credentials", icon: KeyRound },
+      { label: "Capture Page", icon: Crosshair },
     ],
   },
   {
@@ -122,7 +128,10 @@ const navigation: {
   },
   {
     section: "CONFIGURATION",
-    items: [{ label: "Settings", icon: Settings2 }],
+    items: [
+      { label: "Credentials", icon: KeyRound },
+      { label: "Settings", icon: Settings2 },
+    ],
   },
 ];
 
@@ -173,6 +182,8 @@ export default function App() {
   const [csvExecuting, setCsvExecuting] = useState(false);
   const [csvError, setCsvError] = useState("");
   const [csvMessage, setCsvMessage] = useState("");
+  const [registryCsvMode, setRegistryCsvMode] = useState(false);
+  const [registryCsvSteps, setRegistryCsvSteps] = useState<ScenarioStep[] | null>(null);
 
   const [backendStatus, setBackendStatus] = useState("Checking...");
   const [loadingTests, setLoadingTests] = useState(true);
@@ -607,9 +618,25 @@ async function loadTests(projectId?: string) {
     setSelectedScenarioIds([]);
     setCsvError("");
     setCsvMessage("");
+    setRegistryCsvMode(false);
+    setRegistryCsvSteps(null);
     setCsvLoading(true);
     try {
-      const result = await validateCsvScenarios(file);
+      const header = (await file.slice(0, 4096).text()).split(/\r?\n/, 1)[0].toLowerCase();
+      if (header.includes("action") && header.includes("element")) {
+        const parsed = await parseWorkflowCsv(file, activeProjectId);
+        setRegistryCsvMode(true);
+        setRegistryCsvSteps(parsed.steps);
+        const stepRow = { TC_ID: "registry-workflow", Scenario: file.name, Preconditions: "", Steps: `${parsed.steps.length} resolved action step(s)`, Expected_Result: "Workflow steps complete", Priority: "MEDIUM", valid: true };
+        setCsvValidation({valid:true,filename:file.name,total_rows:1,valid_rows:1,columns:["step","url","element","action","value","wait_ms","on_fail"],scenarios:[stepRow]});
+        setSelectedScenarioIds(["registry-workflow"]);
+        setCsvMessage(`CSV parsed: ${parsed.steps.length} step(s), registry elements resolved.`);
+        addLog(`Registry workflow CSV parsed for ${file.name}.`);
+        return;
+      }
+      setRegistryCsvMode(false);
+      setRegistryCsvSteps(null);
+      const result = await validateCsvScenarios(file, activeProjectId);
       setCsvValidation(result);
       const rows = result.scenarios ?? [];
       setSelectedScenarioIds(rows.filter((row) => row.valid !== false).map((row) => row.TC_ID ?? row.tc_id ?? row.id).filter((id): id is string => Boolean(id)));
@@ -634,7 +661,9 @@ async function loadTests(projectId?: string) {
     setCsvError("");
     setCsvMessage("");
     try {
-      const response = await executeCsvScenarios(csvFile, selectedScenarioIds, activeProjectId);
+      const response = registryCsvMode && registryCsvSteps
+        ? await runDynamicWorkflow(activeProjectId, { name: csvFile.name.replace(/\.csv$/i, ""), description: "Workflow imported from CSV", environment: activeProject?.default_environment, steps: registryCsvSteps })
+        : await executeCsvScenarios(csvFile, selectedScenarioIds, activeProjectId);
       setCsvMessage(`Execution started. Run ID: ${response.run_id}`);
       setRunning(true);
       setRunStatus(response.status || "queued");
@@ -1039,6 +1068,13 @@ async function loadTests(projectId?: string) {
             </>
           )}
 
+          {page === "Capture Page" && (
+            <CapturePageWorkspace
+              activeProject={activeProject}
+              onNavigateToWorkflow={() => setPage("Workflow Studio")}
+            />
+          )}
+
           {page === "Workflow Studio" && (
             <ScenarioBuilder
               projectId={activeProjectId}
@@ -1048,6 +1084,7 @@ async function loadTests(projectId?: string) {
               onSelectProject={(id: string) => setActiveProjectId(id)}
               onNavigateToCredentials={() => setPage("Credentials")}
               onNavigateToApplications={() => setPage("Applications")}
+              onNavigateToCapturePage={() => setPage("Capture Page")}
               onRunTriggered={(runId) => {
                 setActiveRunId(runId);
                 setRunning(true);
@@ -1432,14 +1469,14 @@ async function loadTests(projectId?: string) {
               <PageHeader
                 eyebrow="SCENARIO WORKSPACE"
                 title="CSV scenario runner"
-                description="Upload a scenario CSV, validate its structure, select supported scenarios, and run them through the existing Playwright/pytest runner."
+                description="Upload a legacy pytest scenario CSV or a workflow CSV that uses names from this project's Element Registry."
               />
 
               <section className="card csv-upload-card">
                 <div className="csv-upload-heading">
                   <div>
                     <h3>Upload test scenarios</h3>
-                    <p>Required columns: TC_ID, Scenario, Preconditions, Steps, Expected_Result, Priority.</p>
+                    <p>Legacy CSV: TC_ID, Scenario, Preconditions, Steps, Expected_Result, Priority. Workflow CSV: step, url, element, action, value, wait_ms, on_fail.</p>
                   </div>
                   <span className="csv-file-type">.CSV</span>
                 </div>
@@ -1496,7 +1533,7 @@ async function loadTests(projectId?: string) {
                       </tbody>
                     </table>
                   </div>
-                  <p className="csv-support-note"><CircleAlert size={15} /> Only scenario IDs configured in the backend mapping can execute. CSV descriptions are not automatically converted into Playwright steps.</p>
+                  <p className="csv-support-note"><CircleAlert size={15} /> {registryCsvMode ? "Workflow CSV elements resolve against the active project's registry; action rows run through Playwright." : "Legacy CSV descriptions are not automatically converted into Playwright steps; only mapped test IDs execute."}</p>
                 </section>
               )}
             </>

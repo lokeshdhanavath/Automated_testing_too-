@@ -29,6 +29,24 @@ EnvironmentName = Literal["Development", "QA", "Staging", "Production"]
 BrowserName = Literal["chromium", "firefox", "webkit"]
 
 
+def normalize_app_url(url: str) -> str:
+    """Normalizes Oracle Identity Cloud Service (IDCS) and similar application URLs."""
+    if not url:
+        return url
+    u = url.strip()
+    if "identity.oraclecloud.com" in u:
+        if u.endswith("/ui/v1/signin"):
+            u = u[:-len("/ui/v1/signin")] + "/ui/v1/myconsole"
+        elif u.endswith("/signin"):
+            u = u[:-len("/signin")] + "/ui/v1/myconsole"
+        elif "/ui/v1/signin?" not in u and not u.endswith("/ui/v1/myconsole"):
+            if u.endswith("/"):
+                u = u + "ui/v1/myconsole"
+            elif u.endswith(".oraclecloud.com"):
+                u = u + "/ui/v1/myconsole"
+    return u
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -224,7 +242,7 @@ def _insert_project(db, project: dict):
             "external_id": project["id"],
             "name": project["name"],
             "project_type": project["project_type"],
-            "base_url": project["base_url"],
+            "base_url": normalize_app_url(project["base_url"]),
             "test_directory": project.get("test_directory", "tests"),
             "default_environment": project.get("default_environment", "QA"),
             "browser": project.get("browser", "chromium"),
@@ -437,6 +455,7 @@ def update_project(project_id: str, payload: ProjectPayload):
             ),
             {
                 **payload.model_dump(),
+                "base_url": normalize_app_url(str(payload.base_url)),
                 "username_env_var": payload.username_env_var or None,
                 "password_env_var": payload.password_env_var or None,
                 "description": payload.description or None,

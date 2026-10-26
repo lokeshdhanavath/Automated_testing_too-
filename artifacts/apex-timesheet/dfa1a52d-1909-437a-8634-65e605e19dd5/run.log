@@ -1,0 +1,28 @@
+[2026-10-26 06:11:13 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: dfa1a52d-1909-437a-8634-65e605e19dd5)
+[2026-10-26 06:11:13 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-26 06:11:13 UTC] Browser: chromium (Headless: True)
+[2026-10-26 06:11:13 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-26 06:11:42 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-26 06:11:42 UTC] Opening application at: https://oracleapex.com/ords/r/lokesh354/timesheet-application/
+[2026-10-26 06:11:47 UTC] [PASSED] Step 1 finished in 4338ms
+[2026-10-26 06:11:47 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-26 06:11:47 UTC] Entering username for account 'lokesh' into login form...
+[2026-10-26 06:11:47 UTC] Entering encrypted vault password into password field...
+[2026-10-26 06:11:47 UTC] Submitting login form...
+[2026-10-26 06:11:55 UTC] Navigation menu toggle is collapsed (aria-expanded='false'). Expanding via #t_Button_navControl...
+[2026-10-26 06:11:56 UTC] [PASSED] Step 2 finished in 8572ms
+[2026-10-26 06:11:56 UTC] [RUNNING] Step 3: Navigate to My Timesheet (action: navigate)
+[2026-10-26 06:11:56 UTC] Navigating by clicking UI link/menu item 'My Timesheet'...
+[2026-10-26 06:11:56 UTC] Successfully clicked 'My Timesheet' via fast interactive DOM resolver.
+[2026-10-26 06:11:56 UTC] [PASSED] Step 3 finished in 845ms
+[2026-10-26 06:11:56 UTC] [RUNNING] Step 4: Fill Menu Item: "My Timesheet" (action: fill_input)
+[2026-10-26 06:11:57 UTC] Filling input 'My Timesheet' with value '8'...
+[2026-10-26 06:12:57 UTC] [ERROR] Step 4 failed: Locator.fill: Timeout 60000ms exceeded.
+Call log:
+  - waiting for get_by_role("textbox", name="My Timesheet")
+
+[2026-10-26 06:12:57 UTC] Failure screenshot captured: failure_step_4.png
+[2026-10-26 06:12:57 UTC] Scenario failure policy is 'stop'. Aborting remaining steps.
+[2026-10-26 06:13:07 UTC] Video saved and registered: recording.webm
+[2026-10-26 06:13:07 UTC] Workflow execution completed with status: FAILED
+[2026-10-26 06:13:07 UTC] Summary: 3/4 passed, 1 failed, 0 skipped.

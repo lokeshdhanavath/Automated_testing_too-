@@ -1,0 +1,24 @@
+[2026-10-26 07:26:35 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: b46d109a-abb5-4725-b442-b54c1f402328)
+[2026-10-26 07:26:35 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-26 07:26:35 UTC] Browser: chromium (Headless: True)
+[2026-10-26 07:26:35 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-26 07:26:36 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-26 07:26:36 UTC] Opening application at: https://oracleapex.com/ords/r/lokesh354/timesheet-application/
+[2026-10-26 07:26:41 UTC] [PASSED] Step 1 finished in 4626ms
+[2026-10-26 07:26:41 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-26 07:26:41 UTC] Entering username for account 'lokesh' into login form...
+[2026-10-26 07:26:41 UTC] Entering encrypted vault password into password field...
+[2026-10-26 07:26:41 UTC] Submitting login form...
+[2026-10-26 07:26:49 UTC] Navigation menu toggle is collapsed (aria-expanded='false'). Expanding via #t_Button_navControl...
+[2026-10-26 07:26:50 UTC] [PASSED] Step 2 finished in 8430ms
+[2026-10-26 07:26:50 UTC] [RUNNING] Step 3: Click "23" (action: click_element)
+[2026-10-26 07:26:50 UTC] Clicking element 'fc-dom-54' (click)...
+[2026-10-26 07:26:56 UTC] [ERROR] Step 3 failed: Locator.evaluate: Timeout 2000ms exceeded.
+Call log:
+  - waiting for locator("#fc-dom-54").first
+
+[2026-10-26 07:26:56 UTC] Failure screenshot captured: failure_step_3.png
+[2026-10-26 07:26:56 UTC] Scenario failure policy is 'stop'. Aborting remaining steps.
+[2026-10-26 07:26:58 UTC] Video saved and registered: recording.webm
+[2026-10-26 07:26:58 UTC] Workflow execution completed with status: FAILED
+[2026-10-26 07:26:58 UTC] Summary: 2/3 passed, 1 failed, 0 skipped.

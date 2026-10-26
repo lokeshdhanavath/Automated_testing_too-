@@ -1,0 +1,8 @@
+step,url,element,action,value,wait_ms,on_fail
+1,https://www.youtube.com,,open_app,,2000,stop
+2,,youtube_signin_link,click,,1500,stop
+3,,youtube_email_field,fill,test@gmail.com,500,stop
+4,,youtube_next_button,click,,3000,stop
+5,,youtube_password_field,fill,{{password}},500,stop
+6,,youtube_next_button,click,,4000,stop
+7,,youtube_subscribe_button,click,,1500,continue

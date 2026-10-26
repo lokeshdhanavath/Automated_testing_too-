@@ -289,3 +289,68 @@ async def execute_csv_scenarios(
         "selected_tc_ids": normalized_ids,
         "pytest_test_ids": pytest_ids,
     }
+
+# Element registry CSV parser
+
+from typing import Any
+from sqlalchemy.orm import Session
+from app.models.elements import Element
+
+ACTION_MAP = {"open_app":"open_app","open":"open_app","navigate":"navigate","login":"login","click":"click_element","click_element":"click_element","fill":"fill_input","fill_input":"fill_input","type":"fill_input","select":"select_option","select_option":"select_option","verify_visible":"verify_element","verify_contains":"verify_element","verify_exact":"verify_element","wait_for_element":"wait_for_element","wait":"wait_for_element","wait_timeout":"wait_for_element","press_key":"press_key","check":"check","uncheck":"uncheck","hover":"hover","clear":"clear"}
+ELEMENT_REQUIRED = {"click_element","fill_input","select_option","verify_element","wait_for_element","press_key","check","uncheck","hover","clear"}
+URL_ACTIONS = {"open_app","navigate"}
+
+def parse_csv_to_steps(csv_text: str, project_id: str, db: Session) -> list[dict]:
+    """Parse workflow CSV actions and resolve named elements from the project registry."""
+    reader=csv.DictReader(io.StringIO(csv_text))
+    if not reader.fieldnames: raise ValueError("CSV is empty or missing its header row.")
+    reader.fieldnames=[h.strip().lower() for h in reader.fieldnames]
+    project=db_service.resolve_project(db,project_id)
+    elements={e.name:e for e in db.query(Element).filter_by(project_id=uuid.UUID(str(project["id"]))).all()}
+    steps=[]
+    for idx,row in enumerate(reader,start=1):
+        raw=(row.get("action") or "").strip().lower()
+        if not raw: continue
+        if raw not in ACTION_MAP: raise ValueError(f"Row {idx}: unknown action '{raw}'")
+        action=ACTION_MAP[raw]; name=(row.get("element") or "").strip(); url=(row.get("url") or "").strip(); value=row.get("value") or ""
+        try: wait_ms=int(row.get("wait_ms") or 0)
+        except ValueError as exc: raise ValueError(f"Row {idx}: wait_ms must be an integer.") from exc
+        on_fail=(row.get("on_fail") or "stop").strip().lower()
+        if on_fail not in {"stop","continue"} and not on_fail.startswith("retry:"): raise ValueError(f"Row {idx}: invalid on_fail policy.")
+        params: dict[str,Any]={"value":value,"wait_after_ms":wait_ms,"element_name":name}
+        if raw=="verify_visible": params["verify_type"]="visible"
+        elif raw=="verify_contains": params.update({"verify_type":"contains_text","expected":value})
+        elif raw=="verify_exact": params.update({"verify_type":"exact_text","expected":value})
+        if action in URL_ACTIONS: lt,lv=None,url;params["url"]=url
+        elif action in ELEMENT_REQUIRED:
+            if not name: raise ValueError(f"Row {idx}: action '{raw}' requires an element name.")
+            el=elements.get(name)
+            if not el: raise ValueError(f"Row {idx}: element '{name}' is not registered for this project.")
+            lt,lv=el.selector_type,el.selector_value
+            params.update({"element_kind":el.element_kind,"fallback_type":el.fallback_type,"fallback_value":el.fallback_value})
+        else: lt,lv=None,""
+        steps.append({"step_order":idx,"action_type":action,"locator_type":lt,"locator_value":lv,"action_params":params,"on_fail":on_fail,"is_enabled":True,"timeout_ms":None,"description":f"Step {idx}: {raw} '{name or url}'"})
+    if not steps: raise ValueError("CSV contains no executable action rows.")
+    return steps
+
+
+@router.post("/workflow/parse")
+async def parse_registry_workflow_csv(file: UploadFile = File(...), project_id: str = Form(...)) -> dict:
+    """Validate a workflow CSV and resolve its named elements for execution."""
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a .csv file.")
+    content = await file.read(MAX_FILE_SIZE + 1)
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="CSV file exceeds the 2 MB limit.")
+    try:
+        text_content = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="CSV must use UTF-8 encoding.") from exc
+    db = SessionLocal()
+    try:
+        steps = parse_csv_to_steps(text_content, project_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        db.close()
+    return {"filename": file.filename, "project_id": project_id, "steps": steps}

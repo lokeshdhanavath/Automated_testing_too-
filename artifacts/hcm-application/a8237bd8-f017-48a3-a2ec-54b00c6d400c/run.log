@@ -1,0 +1,14 @@
+[2026-10-26 08:33:24 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: a8237bd8-f017-48a3-a2ec-54b00c6d400c)
+[2026-10-26 08:33:24 UTC] Target Application: 'HCM Application' at https://idcs-93b12955810e4c66b9472c31c7cc31c2.identity.oraclecloud.com/ui/v1/signin
+[2026-10-26 08:33:24 UTC] Browser: chromium (Headless: True)
+[2026-10-26 08:33:24 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-26 08:33:26 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-26 08:33:26 UTC] Opening application at: https://idcs-93b12955810e4c66b9472c31c7cc31c2.identity.oraclecloud.com/ui/v1/signin/
+[2026-10-26 08:33:30 UTC] [PASSED] Step 1 finished in 3730ms
+[2026-10-26 08:33:30 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-26 08:33:30 UTC] [ERROR] Step 2 failed: Could not automatically locate the Username field. Please specify a username locator in the action settings.
+[2026-10-26 08:33:30 UTC] Failure screenshot captured: failure_step_2.png
+[2026-10-26 08:33:30 UTC] Scenario failure policy is 'stop'. Aborting remaining steps.
+[2026-10-26 08:33:31 UTC] Video saved and registered: recording.webm
+[2026-10-26 08:33:32 UTC] Workflow execution completed with status: FAILED
+[2026-10-26 08:33:32 UTC] Summary: 1/2 passed, 1 failed, 0 skipped.

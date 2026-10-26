@@ -56,6 +56,7 @@ class StepPayload(BaseModel):
     description: str | None = None
     is_enabled: bool = True
     timeout_ms: int | None = None
+    on_fail: str | None = None
 
 
 class ScenarioCreatePayload(BaseModel):
@@ -573,6 +574,7 @@ def trigger_dynamic_workflow_run(project_id: str, payload: DynamicWorkflowPayloa
                 "description": s.description or f"Step {idx}: {s.action_type}",
                 "is_enabled": s.is_enabled,
                 "timeout_ms": s.timeout_ms,
+                "on_fail": s.on_fail,
             })
 
         scenario_uuid = None

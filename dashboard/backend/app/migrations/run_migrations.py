@@ -9,6 +9,8 @@ BACKEND_DIR = Path(__file__).resolve().parents[2]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+import importlib
+
 from app.database import engine
 from sqlalchemy import text
 
@@ -24,8 +26,9 @@ def run_migrations():
     with engine.begin() as conn:
         # Split statements by semicolon where appropriate, or execute the block
         conn.execute(text(sql_statements))
+        importlib.import_module("app.migrations.20261027_add_elements").up(conn)
 
-    print("Migration applied successfully!")
+    print("Migrations applied successfully!")
 
 
 if __name__ == "__main__":

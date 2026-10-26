@@ -8,6 +8,7 @@ import {
   ListFilter,
   CheckCircle2,
   Clock,
+  Crosshair,
   Play,
   Plus,
   Pencil,
@@ -45,8 +46,10 @@ import type {
   CredentialItem,
   ProjectConfig,
   InspectElement,
+  DiscoveredElement,
 } from "../services/api";
 import { ElementPickerModal } from "./ElementPickerModal";
+import { ElementCatalog } from "./ElementCatalog";
 
 interface ScenarioBuilderProps {
   projectId: string;
@@ -56,6 +59,7 @@ interface ScenarioBuilderProps {
   onSelectProject?: (projectId: string) => void;
   onNavigateToCredentials?: () => void;
   onNavigateToApplications?: () => void;
+  onNavigateToCapturePage?: () => void;
   onRunTriggered: (runId: string) => void;
   running?: boolean;
   onStopRun?: () => void;
@@ -137,6 +141,7 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
   onSelectProject,
   onNavigateToCredentials,
   onNavigateToApplications,
+  onNavigateToCapturePage,
   onRunTriggered,
   running = false,
   onStopRun,
@@ -167,6 +172,28 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     },
   ]);
 
+  // Load persisted workflow steps if any
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(`veriqon_steps_${projectId}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setWorkflowSteps(parsed);
+        }
+      }
+    } catch {}
+  }, [projectId]);
+
+  // Persist workflow steps on changes
+  useEffect(() => {
+    try {
+      if (workflowSteps.length > 0) {
+        localStorage.setItem(`veriqon_steps_${projectId}`, JSON.stringify(workflowSteps));
+      }
+    } catch {}
+  }, [workflowSteps, projectId]);
+
   // Modal / Editing states
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
   const [stepModalOpen, setStepModalOpen] = useState(false);
@@ -181,8 +208,8 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
   });
   const [showAdvancedLocators, setShowAdvancedLocators] = useState(false);
 
-  // Tab: "steps" vs "csv"
-  const [builderTab, setBuilderTab] = useState<"steps" | "csv">("steps");
+  // Tab: "steps" vs "csv" vs "pages"
+  const [builderTab, setBuilderTab] = useState<"steps" | "csv" | "pages">("steps");
 
   // CSV Data inputs state
   const [csvColumns, setCsvColumns] = useState<string[]>(["Hours", "Task_Name", "Project", "Comments"]);
@@ -292,6 +319,9 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
   const [elementPickerOpen, setElementPickerOpen] = useState(false);
   const [currentPickingTarget, setCurrentPickingTarget] = useState<string>("main");
   const [navigateMethod, setNavigateMethod] = useState<"menu" | "url">("menu");
+
+  // Element Discovery / Catalog states
+  const [showCatalog, setShowCatalog] = useState(false);
 
   function handlePickedElement(el: InspectElement) {
     if (currentPickingTarget === "username") {
@@ -644,6 +674,26 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     }
   }
 
+  function handleCatalogSelect(el: DiscoveredElement) {
+    setShowCatalog(false);
+    setModalStepData((prev) => ({
+      ...prev,
+      locator_value: el.locator_value,
+      locator_type: el.locator_strategy,
+      description: prev.description ||
+        `${prev.action_type === 'click_element' ? 'Click' :
+           prev.action_type === 'fill_input' ? 'Fill' :
+           prev.action_type === 'select_option' ? 'Select' :
+           prev.action_type === 'verify_element' ? 'Verify' :
+           'Interact with'} ${el.friendly_name}`,
+      action_params: {
+        ...prev.action_params,
+        element_friendly_name: el.friendly_name,
+        element_category: el.category,
+      },
+    }));
+  }
+
   return (
     <div className="sb-container">
       {/* =========================================================================
@@ -759,6 +809,18 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
           >
             <Sparkles size={14} style={{ color: "var(--v-accent)" }} />
             <span>Standard Flow</span>
+          </button>
+
+          {/* Pages & Elements button */}
+          <button
+            type="button"
+            onClick={() => setBuilderTab("pages")}
+            className="button button-secondary button-small"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            title="Browse captured application pages and interactive controls"
+          >
+            <Compass size={14} style={{ color: "var(--v-accent)" }} />
+            <span>Pages & Elements</span>
           </button>
 
           <button
@@ -924,6 +986,29 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                 {csvRows.length} rows
               </span>
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setBuilderTab("pages")}
+            style={{
+              padding: "7px 16px",
+              borderRadius: 6,
+              border: "none",
+              fontSize: "0.82rem",
+              fontWeight: builderTab === "pages" ? 700 : 500,
+              background: builderTab === "pages" ? "var(--v-surface)" : "transparent",
+              color: builderTab === "pages" ? "var(--v-accent)" : "var(--v-text-secondary)",
+              boxShadow: builderTab === "pages" ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 7,
+              transition: "all 0.15s ease",
+            }}
+          >
+            <Compass size={15} />
+            <span>Pages & Elements</span>
           </button>
         </div>
 
@@ -1487,6 +1572,54 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* =========================================================================
+          PAGES & ELEMENTS PANEL (Page-wise Capture & Natural Catalog)
+      ========================================================================= */}
+      {builderTab === "pages" && (
+        <div style={{ marginTop: 8 }}>
+          {onNavigateToCapturePage && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "12px 16px",
+                background: "#f0fdf4",
+                border: "1px solid #bbf7d0",
+                borderRadius: 8,
+                marginBottom: 12,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Crosshair size={18} color="#059669" />
+                <span style={{ fontSize: "0.88rem", color: "#166534" }}>
+                  <strong>Need to capture new pages or pick elements on screen?</strong> Open the interactive desktop browser workspace.
+                </span>
+              </div>
+              <button
+                className="button button-primary"
+                style={{ backgroundColor: "#059669" }}
+                onClick={onNavigateToCapturePage}
+              >
+                <Crosshair size={14} />
+                Open Capture Page
+              </button>
+            </div>
+          )}
+          <ElementCatalog
+            projectId={projectId}
+            projectName={projectName}
+            isInline={true}
+            onAddActionToWorkflow={(step) => {
+              setWorkflowSteps((prev) => [
+                ...prev,
+                { ...step, step_order: prev.length + 1 },
+              ]);
+            }}
+          />
         </div>
       )}
 
@@ -2366,15 +2499,39 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                 modalStepData.action_type
               ) && (
                 <div style={{ paddingTop: 8, borderTop: "1px solid var(--v-border)" }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowAdvancedLocators(!showAdvancedLocators)}
-                    style={{ background: "transparent", border: "none", color: "var(--v-text-muted)", fontSize: "0.75rem", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0 }}
-                  >
-                    <Settings2 size={13} />
-                    Advanced Locator Strategy
-                    {showAdvancedLocators ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                  </button>
+                  {/* Pick from Catalog link */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvancedLocators(!showAdvancedLocators)}
+                      style={{ background: "transparent", border: "none", color: "var(--v-text-muted)", fontSize: "0.75rem", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, padding: 0 }}
+                    >
+                      <Settings2 size={13} />
+                      Advanced Locator Strategy
+                      {showAdvancedLocators ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowCatalog(true)}
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "var(--v-accent)",
+                        fontSize: "0.75rem",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 4,
+                        padding: 0,
+                        textDecoration: "underline",
+                        textUnderlineOffset: 2,
+                      }}
+                      title="Pick element from discovered catalog"
+                    >
+                      📋 Pick from Catalog
+                    </button>
+                  </div>
 
                   {showAdvancedLocators && (
                     <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: "var(--v-surface-2)", border: "1px solid var(--v-border)", display: "flex", flexDirection: "column", gap: 6 }}>
@@ -2486,11 +2643,23 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
           projectId={projectId}
           projectName={projectName}
           actionType={modalStepData.action_type}
+          precedingSteps={workflowSteps.slice(0, editingStepIndex !== null ? editingStepIndex : workflowSteps.length)}
           onSelectElement={(el) => {
             handlePickedElement(el);
             setElementPickerOpen(false);
           }}
           onClose={() => setElementPickerOpen(false)}
+        />
+      )}
+
+      {/* =========================================================================
+          7. ELEMENT CATALOG MODAL (DISCOVERED ELEMENTS)
+      ========================================================================= */}
+      {showCatalog && (
+        <ElementCatalog
+          projectId={projectId}
+          onSelectElement={(el) => handleCatalogSelect(el)}
+          onClose={() => setShowCatalog(false)}
         />
       )}
     </div>

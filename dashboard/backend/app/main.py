@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.database import SessionLocal
-from app import db_service, credentials_service
+from app import db_service, credentials_service, elements_api
 from app.csv_scenarios import router as csv_scenarios_router
 from app.projects_api import router as projects_router
 from app.scripts_api import router as scripts_router
@@ -78,6 +78,8 @@ app.include_router(csv_scenarios_router)
 app.include_router(projects_router)
 app.include_router(scenarios_router)
 app.include_router(inspector_router)
+app.include_router(elements_api.router)
+app.include_router(elements_api.elements_alias_router)
 
 lock = Lock()
 runs: dict[str, dict[str, Any]] = {}

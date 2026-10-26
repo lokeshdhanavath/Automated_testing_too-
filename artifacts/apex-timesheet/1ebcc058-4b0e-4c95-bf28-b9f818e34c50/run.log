@@ -1,0 +1,29 @@
+[2026-10-26 07:11:53 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 1ebcc058-4b0e-4c95-bf28-b9f818e34c50)
+[2026-10-26 07:11:53 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-26 07:11:53 UTC] Browser: chromium (Headless: True)
+[2026-10-26 07:11:58 UTC] [RUNNING] Step 1: Open Application (action: open_app)
+[2026-10-26 07:11:58 UTC] Opening application at: https://oracleapex.com/ords/r/lokesh354/timesheet-application/
+[2026-10-26 07:12:03 UTC] [PASSED] Step 1 finished in 4295ms
+[2026-10-26 07:12:03 UTC] [RUNNING] Step 2: Log In (action: login)
+[2026-10-26 07:12:03 UTC] Entering username for account 'lokesh' into login form...
+[2026-10-26 07:12:03 UTC] Entering encrypted vault password into password field...
+[2026-10-26 07:12:03 UTC] Submitting login form...
+[2026-10-26 07:12:11 UTC] Navigation menu toggle is collapsed (aria-expanded='false'). Expanding via #t_Button_navControl...
+[2026-10-26 07:12:12 UTC] [PASSED] Step 2 finished in 9082ms
+[2026-10-26 07:12:12 UTC] [RUNNING] Step 3: Navigate to Timesheet (action: navigate)
+[2026-10-26 07:12:12 UTC] Navigating to page path: https://oracleapex.com/ords/r/lokesh354/timesheet-application/
+[2026-10-26 07:12:15 UTC] [PASSED] Step 3 finished in 2776ms
+[2026-10-26 07:12:15 UTC] [RUNNING] Step 4: Click Add Project (action: click_element)
+[2026-10-26 07:12:15 UTC] Clicking element 'add_project_btn' (click)...
+[2026-10-26 07:12:21 UTC] [ERROR] Step 4 failed: Locator.evaluate: Timeout 2000ms exceeded.
+Call log:
+  - waiting for locator("add_project_btn").first
+
+[2026-10-26 07:12:21 UTC] Failure screenshot captured: failure_step_4.png
+[2026-10-26 07:12:21 UTC] Scenario failure policy is 'stop'. Aborting remaining steps.
+[2026-10-26 07:12:21 UTC] [SKIPPED] Step 5: Select DM project
+[2026-10-26 07:12:21 UTC] [SKIPPED] Step 6: Enter Monday Hours
+[2026-10-26 07:12:21 UTC] [SKIPPED] Step 7: Save Timesheet
+[2026-10-26 07:12:24 UTC] Video saved and registered: recording.webm
+[2026-10-26 07:12:24 UTC] Workflow execution completed with status: FAILED
+[2026-10-26 07:12:24 UTC] Summary: 3/7 passed, 1 failed, 3 skipped.

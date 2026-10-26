@@ -1,0 +1,7 @@
+step,url,element,action,value,wait_ms,on_fail
+1,https://oracleapex.com/ords/r/lokesh354/timesheet-application/login,,open_app,,2000,stop
+2,,apex_username,fill,lokesh,300,stop
+3,,apex_password,fill,{{password}},300,stop
+4,,apex_signin_btn,click,,4000,stop
+5,,apex_my_timesheet,click,,3000,stop
+6,,timesheet_grid,verify_visible,,1000,stop

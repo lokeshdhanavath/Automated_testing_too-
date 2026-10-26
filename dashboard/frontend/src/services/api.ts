@@ -6,7 +6,7 @@ export const API_BASE_URL =
 async function apiRequest<T>(
   path: string,
   options: RequestInit = {},
-  retries: number = 2,
+  retries: number = 2, timeoutMs: number = 12000,
 ): Promise<T> {
   const isFormData =
     typeof FormData !== "undefined" && options.body instanceof FormData;
@@ -18,7 +18,7 @@ async function apiRequest<T>(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 12000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   let response: Response;
   try {
@@ -420,6 +420,14 @@ export interface CsvValidationResponse {
   scenarios?: CsvScenario[];
 }
 
+
+export async function parseWorkflowCsv(file: File, projectId: string): Promise<{filename: string; project_id: string; steps: ScenarioStep[]}> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("project_id", projectId);
+  return apiRequest("/api/csv-scenarios/workflow/parse", {method:"POST", body:form}, 2, 90000);
+}
+
 export async function validateCsvScenarios(
   file: File,
   projectId?: string,
@@ -515,6 +523,7 @@ export interface ScenarioStep {
   description?: string;
   is_enabled?: boolean;
   timeout_ms?: number;
+  on_fail?: string;
 }
 
 export interface ScenarioItem {
@@ -724,7 +733,8 @@ export async function runDynamicWorkflow(
 export interface InspectElement {
   id: string;
   category: "button" | "link" | "input" | "select" | "checkbox" | "other";
-  tag: string;
+  tag?: string;
+  tag_name?: string;
   role: string;
   type: string;
   text: string;
@@ -736,6 +746,10 @@ export interface InspectElement {
   locator_strategy: string;
   locator_value: string;
   is_ambiguous: boolean;
+  in_dialog?: boolean;
+  dialog_title?: string;
+  frame_name?: string;
+  frame_url?: string;
   options: { value: string; label: string }[];
   rect: { x: number; y: number; width: number; height: number };
 }
@@ -743,6 +757,7 @@ export interface InspectElement {
 export interface InspectResponse {
   project_id: string;
   project_name: string;
+  session_id?: string;
   page_url: string;
   page_title: string;
   screenshot: string;
@@ -756,6 +771,9 @@ export interface InspectResponse {
     total: number;
   };
   authenticated: boolean;
+  has_open_dialog?: boolean;
+  active_dialog_title?: string;
+  session_active?: boolean;
 }
 
 export async function inspectApplicationPage(
@@ -765,18 +783,19 @@ export async function inspectApplicationPage(
     with_login?: boolean;
     expand_navigation?: boolean;
     force_refresh?: boolean;
+    preserve_state?: boolean;
   } = {},
 ): Promise<InspectResponse> {
   return apiRequest<InspectResponse>(`/api/inspector/${encodeURIComponent(projectId)}/inspect`, {
     method: "POST",
     body: JSON.stringify(options),
-  });
+  }, 2, 90000);
 }
 
 export async function interactWithInspector(
   projectId: string,
   payload: {
-    action: "click" | "navigate" | "login" | "expand_nav";
+    action: "click" | "navigate" | "login" | "expand_nav" | "fill";
     target?: string;
     locator_type?: string;
     value?: string;
@@ -788,11 +807,237 @@ export async function interactWithInspector(
   });
 }
 
+export async function replayInspectorSteps(
+  projectId: string,
+  steps: ScenarioStep[],
+): Promise<InspectResponse> {
+  return apiRequest<InspectResponse>(`/api/inspector/${encodeURIComponent(projectId)}/replay-steps`, {
+    method: "POST",
+    body: JSON.stringify({ steps }),
+  }, 2, 90000);
+}
+
+export async function getInspectorSessionStatus(
+  projectId: string,
+): Promise<{
+  active: boolean;
+  session_id?: string;
+  current_url?: string;
+  page_title?: string;
+  last_active_seconds_ago?: number;
+  authenticated?: boolean;
+  has_open_dialog?: boolean;
+}> {
+  return apiRequest(`/api/inspector/${encodeURIComponent(projectId)}/status`);
+}
+
 export async function closeInspectorSession(projectId: string): Promise<{ status: string }> {
   return apiRequest<{ status: string }>(`/api/inspector/${encodeURIComponent(projectId)}/close`, {
     method: "POST",
   });
 }
+export type CapturedElement = {
+  id:string; project_id:string; name:string; description?:string|null; page_url?:string|null;
+  element_kind?:string|null; selector_type:string; selector_value:string;
+  fallback_type?:string|null; fallback_value?:string|null; created_at:string;
+};
+export async function createElement(projectId:string,payload:{
+  name:string;description?:string;page_url?:string;element_kind?:string;selector_type:string;
+  selector_value:string;fallback_type?:string;fallback_value?:string;
+}):Promise<CapturedElement>{
+  return apiRequest<CapturedElement>("/api/projects/"+encodeURIComponent(projectId)+"/elements",
+    {method:"POST",body:JSON.stringify(payload)});
+}
+export async function listElements(projectId:string):Promise<CapturedElement[]>{
+  return apiRequest<CapturedElement[]>("/api/projects/"+encodeURIComponent(projectId)+"/elements");
+}
+export async function updateElement(projectId:string,name:string,payload:Partial<{
+  description:string;selector_type:string;selector_value:string;fallback_type:string;fallback_value:string;
+}>):Promise<CapturedElement>{
+  return apiRequest<CapturedElement>("/api/projects/"+encodeURIComponent(projectId)+"/elements/"+encodeURIComponent(name),
+    {method:"PATCH",body:JSON.stringify(payload)});
+}
+export async function deleteElement(projectId:string,name:string):Promise<void>{
+  await apiRequest<void>("/api/projects/"+encodeURIComponent(projectId)+"/elements/"+encodeURIComponent(name),{method:"DELETE"});
+}
+
+// Discovered element catalog (from element discovery scan)
+export interface DiscoveredElement {
+  id: string;
+  project_id: string;
+  page_url: string;
+  page_name?: string;
+  friendly_name: string;
+  description?: string;
+  category: string;
+  tag_name: string;
+  role: string | null;
+  label: string | null;
+  placeholder: string | null;
+  locator_strategy: string;
+  locator_value: string;
+  in_dialog: boolean;
+  dialog_title: string | null;
+  discovered_at: string;
+}
+
+export interface CapturedPage {
+  page_url: string;
+  page_name: string;
+  element_count: number;
+  last_captured_at: string | null;
+}
+
+export interface DiscoverResult {
+  project_id: string;
+  page_url: string;
+  page_name?: string;
+  total_scanned: number;
+  inserted: number;
+  updated: number;
+  elements: DiscoveredElement[];
+}
+
+export async function discoverElements(
+  projectId: string,
+  force_refresh = false
+): Promise<DiscoverResult> {
+  return apiRequest<DiscoverResult>(
+    '/api/inspector/' + encodeURIComponent(projectId) + '/discover',
+    { method: 'POST', body: JSON.stringify({ force_refresh }) }
+  );
+}
+
+export async function captureCurrentPage(
+  projectId: string
+): Promise<DiscoverResult> {
+  return discoverElements(projectId, false);
+}
+
+export async function listCapturedPages(
+  projectId: string
+): Promise<CapturedPage[]> {
+  return apiRequest<CapturedPage[]>(
+    '/api/projects/' + encodeURIComponent(projectId) + '/elements/pages'
+  );
+}
+
+export async function listDiscoveredElements(
+  projectId: string,
+  pageUrl?: string,
+  category?: string,
+  search?: string
+): Promise<DiscoveredElement[]> {
+  let url = '/api/projects/' + encodeURIComponent(projectId) + '/elements';
+  const params: string[] = [];
+  if (pageUrl) params.push('page_url=' + encodeURIComponent(pageUrl));
+  if (category) params.push('category=' + encodeURIComponent(category));
+  if (search) params.push('search=' + encodeURIComponent(search));
+  if (params.length) url += '?' + params.join('&');
+  return apiRequest<DiscoveredElement[]>(url);
+}
 
 
+// ---------------------------------------------------------------------------
+// Phase 1.2: Visible Browser Session & Visual Element Picker APIs
+// ---------------------------------------------------------------------------
 
+export interface BrowserStatus {
+  active: boolean;
+  visible: boolean;
+  project_id: string;
+  session_id?: string;
+  current_url?: string;
+  clean_url?: string;
+  display_url?: string;
+  page_title?: string;
+  page_name?: string;
+  picker_active?: boolean;
+  authenticated?: boolean;
+  last_active_seconds_ago?: number;
+  error?: string;
+}
+
+export interface PickerStatusResponse {
+  status: "idle" | "picking" | "selected";
+  active: boolean;
+  element: DiscoveredElement | null;
+  error?: string;
+}
+
+export interface SaveSelectedElementPayload {
+  friendly_name: string;
+  description?: string;
+  category: string;
+  tag_name: string;
+  role?: string | null;
+  label?: string | null;
+  placeholder?: string | null;
+  locator_strategy: string;
+  locator_value: string;
+  in_dialog?: boolean;
+  dialog_title?: string | null;
+  page_url: string;
+  page_name?: string;
+}
+
+export async function startInspectorBrowser(
+  projectId: string,
+  visible = true,
+  withLogin = true
+): Promise<BrowserStatus> {
+  return apiRequest<BrowserStatus>(
+    `/api/inspector/${encodeURIComponent(projectId)}/start-browser`,
+    {
+      method: "POST",
+      body: JSON.stringify({ visible, with_login: withLogin }),
+    }
+  );
+}
+
+export async function getInspectorBrowserStatus(
+  projectId: string
+): Promise<BrowserStatus> {
+  return apiRequest<BrowserStatus>(
+    `/api/inspector/${encodeURIComponent(projectId)}/browser-status`
+  );
+}
+
+export async function startElementPicker(
+  projectId: string
+): Promise<{ status: string; active: boolean }> {
+  return apiRequest<{ status: string; active: boolean }>(
+    `/api/inspector/${encodeURIComponent(projectId)}/start-picker`,
+    { method: "POST" }
+  );
+}
+
+export async function getElementPickerStatus(
+  projectId: string
+): Promise<PickerStatusResponse> {
+  return apiRequest<PickerStatusResponse>(
+    `/api/inspector/${encodeURIComponent(projectId)}/picker-status`
+  );
+}
+
+export async function cancelElementPicker(
+  projectId: string
+): Promise<{ status: string; active: boolean }> {
+  return apiRequest<{ status: string; active: boolean }>(
+    `/api/inspector/${encodeURIComponent(projectId)}/cancel-picker`,
+    { method: "POST" }
+  );
+}
+
+export async function saveSelectedElement(
+  projectId: string,
+  payload: SaveSelectedElementPayload
+): Promise<DiscoveredElement> {
+  return apiRequest<DiscoveredElement>(
+    `/api/inspector/${encodeURIComponent(projectId)}/save-selected-element`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}

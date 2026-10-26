@@ -13,19 +13,25 @@ import {
   ListFilter,
   AlertCircle,
   LoaderCircle,
+  Sparkles,
+  Power,
+  RotateCcw,
 } from "lucide-react";
 import {
   inspectApplicationPage,
   interactWithInspector,
+  replayInspectorSteps,
   closeInspectorSession,
+  createElement,
 } from "../services/api";
-import type { InspectElement, InspectResponse } from "../services/api";
+import type { InspectElement, InspectResponse, ScenarioStep } from "../services/api";
 
 interface ElementPickerModalProps {
   projectId: string;
   projectName: string;
   actionType: string;
   initialPath?: string;
+  precedingSteps?: ScenarioStep[];
   onSelectElement: (element: InspectElement) => void;
   onClose: () => void;
 }
@@ -35,11 +41,13 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
   projectName,
   actionType,
   initialPath,
+  precedingSteps,
   onSelectElement,
   onClose,
 }) => {
   const [loading, setLoading] = useState(true);
   const [interactLoading, setInteractLoading] = useState(false);
+  const [replayingSteps, setReplayingSteps] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inspectData, setInspectData] = useState<InspectResponse | null>(null);
 
@@ -50,6 +58,10 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
 
   // Selection states
   const [selectedElement, setSelectedElement] = useState<InspectElement | null>(null);
+  const [registryName, setRegistryName] = useState("");
+  const [showRegistryForm, setShowRegistryForm] = useState(false);
+  const [savingElement, setSavingElement] = useState(false);
+  const [registryToast, setRegistryToast] = useState("");
   const [hoveredElement, setHoveredElement] = useState<InspectElement | null>(null);
 
   // Image scaling for visual overlay
@@ -71,12 +83,11 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
     }
   }, [actionType]);
 
-  // Load initial page inspection
+  // Load page inspection preserving the live persistent browser session
   useEffect(() => {
-    void loadInspection(false);
-    return () => {
-      void closeInspectorSession(projectId).catch(() => {});
-    };
+    const shouldAutoLogin = actionType !== "login";
+    void loadInspection(shouldAutoLogin, false);
+    // DO NOT kill session on modal unmount so browser session persists across actions
   }, [projectId]);
 
   async function loadInspection(withLogin: boolean = false, forceRefresh: boolean = false) {
@@ -88,11 +99,13 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
         with_login: withLogin,
         expand_navigation: true,
         force_refresh: forceRefresh,
+        preserve_state: !forceRefresh,
       });
       setInspectData(data);
       // Select first matching element if none selected
       if (!selectedElement && data.elements.length > 0) {
         const preferred = data.elements.find((el) => {
+          if (data.has_open_dialog && el.in_dialog) return true;
           if (actionType === "navigate") return el.category === "link";
           if (actionType === "fill_input") return el.category === "input";
           if (actionType === "click_element") return el.category === "button";
@@ -105,6 +118,33 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
       setError(err?.message || "Failed to inspect application page.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function saveSelectedElement() {
+    if (!selectedElement || !inspectData) return;
+    const name = registryName.trim();
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,119}$/.test(name)) {
+      setError("Name must start with a letter and contain only letters, digits, or underscores.");
+      return;
+    }
+    setSavingElement(true);
+    setError(null);
+    try {
+      await createElement(projectId, {
+        name,
+        page_url: inspectData.page_url,
+        element_kind: selectedElement.category,
+        selector_type: selectedElement.locator_strategy === "smart" ? "css" : selectedElement.locator_strategy,
+        selector_value: selectedElement.locator_value,
+        description: selectedElement.friendly_name,
+      });
+      setRegistryToast("Saved '" + name + "' to registry.");
+      window.setTimeout(onClose, 900);
+    } catch (err: any) {
+      setError(err?.message || "Failed to save element to registry.");
+    } finally {
+      setSavingElement(false);
     }
   }
 
@@ -126,11 +166,11 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
   }, [inspectData]);
 
   // Execute interactive walkthrough step inside inspector
-  async function handleInteractiveAction(action: "login" | "expand_nav") {
+  async function handleInteractiveAction(action: "login" | "expand_nav" | "click" | "navigate" | "fill", target?: string) {
     setInteractLoading(true);
     setError(null);
     try {
-      const updated = await interactWithInspector(projectId, { action });
+      const updated = await interactWithInspector(projectId, { action, target });
       setInspectData(updated);
       setSelectedElement(null);
     } catch (err: any) {
@@ -140,13 +180,41 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
     }
   }
 
+  // Replay preceding workflow steps to reach target modal/dialog state
+  async function handleReplayPrecedingSteps() {
+    if (!precedingSteps || precedingSteps.length === 0) return;
+    setReplayingSteps(true);
+    setError(null);
+    try {
+      const updated = await replayInspectorSteps(projectId, precedingSteps);
+      setInspectData(updated);
+      setSelectedElement(null);
+    } catch (err: any) {
+      setError(err?.message || "Failed to prepare page using preceding steps.");
+    } finally {
+      setReplayingSteps(false);
+    }
+  }
+
+  // Explicit disconnect session
+  async function handleDisconnectSession() {
+    try {
+      await closeInspectorSession(projectId);
+    } catch {}
+    onClose();
+  }
+
+  const hasDialogElements = (inspectData?.elements || []).some((e) => e.in_dialog);
+  const dialogElementsCount = (inspectData?.elements || []).filter((e) => e.in_dialog).length;
+
   // Filter elements
   const filteredElements = (inspectData?.elements || []).filter((el) => {
     const matchesCategory =
       categoryFilter === "all" ||
+      (categoryFilter === "dialog" && el.in_dialog) ||
       el.category === categoryFilter ||
       (categoryFilter === "button" && (el.category === "button" || el.role === "button")) ||
-      (categoryFilter === "link" && (el.category === "link" || el.role === "link" || el.role === "treeitem"));
+      (categoryFilter === "link" && (el.category === "link" || el.role === "link" || el.role === "treeitem" || el.role === "menuitem"));
 
     const q = searchQuery.toLowerCase().trim();
     const matchesQuery =
@@ -180,9 +248,9 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
       <div
         className="sb-modal-card"
         style={{
-          maxWidth: 1100,
+          maxWidth: 1140,
           width: "95vw",
-          height: "90vh",
+          height: "92vh",
           display: "flex",
           flexDirection: "column",
           padding: 0,
@@ -194,7 +262,7 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
         ========================================================================= */}
         <div
           style={{
-            padding: "14px 20px",
+            padding: "12px 20px",
             borderBottom: "1px solid var(--v-border)",
             display: "flex",
             alignItems: "center",
@@ -225,32 +293,88 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                 <span
                   style={{
                     fontSize: "0.7rem",
-                    padding: "2px 7px",
+                    padding: "2px 8px",
                     borderRadius: 4,
-                    background: "rgba(16, 185, 129, 0.1)",
+                    background: "rgba(16, 185, 129, 0.12)",
                     color: "var(--v-emerald)",
-                    fontWeight: 600,
+                    fontWeight: 700,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
                   }}
                 >
-                  Live Playwright Inspector
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--v-emerald)" }} />
+                  Persistent Browser Session
                 </span>
               </div>
               <p style={{ margin: "2px 0 0 0", fontSize: "0.75rem", color: "var(--v-text-secondary)" }}>
-                Click any interactive element on the rendered page or choose from the discovered list.
+                Inspect live application state, open modals/dialogs, or pick elements across actions without reconnecting.
               </p>
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {/* Replay Preceding Steps Button */}
+            {precedingSteps && precedingSteps.length > 0 && (
+              <button
+                type="button"
+                className="button button-small"
+                style={{
+                  background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
+                  color: "#fff",
+                  border: "none",
+                  fontSize: "0.74rem",
+                  padding: "4px 10px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                  fontWeight: 600,
+                  boxShadow: "0 2px 6px rgba(79, 70, 229, 0.25)",
+                }}
+                onClick={() => void handleReplayPrecedingSteps()}
+                disabled={loading || interactLoading || replayingSteps}
+                title={`Run ${precedingSteps.length} earlier step(s) to automatically open dialogs or advance page`}
+              >
+                <Sparkles size={13} className={replayingSteps ? "spin" : ""} />
+                {replayingSteps
+                  ? `Preparing Page (${precedingSteps.length} steps)...`
+                  : `⚡ Prepare Page (${precedingSteps.length} preceding step${precedingSteps.length > 1 ? "s" : ""})`}
+              </button>
+            )}
+
+            {/* Refresh DOM Button */}
             <button
               type="button"
               className="button button-secondary button-small"
-              onClick={() => void loadInspection(false, true)}
-              disabled={loading || interactLoading}
-              title="Re-scan and refresh page"
+              onClick={() => void loadInspection(false, false)}
+              disabled={loading || interactLoading || replayingSteps}
+              title="Re-scan current page without reloading"
             >
-              <RefreshCw size={14} className={loading ? "spin" : ""} /> Refresh
+              <RefreshCw size={13} className={loading ? "spin" : ""} /> Refresh
             </button>
+
+            {/* Restart Browser Session Button */}
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={() => void loadInspection(true, true)}
+              disabled={loading || interactLoading || replayingSteps}
+              title="Restart browser session from scratch"
+            >
+              <RotateCcw size={13} /> Reset
+            </button>
+
+            {/* Disconnect Session Button */}
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={() => void handleDisconnectSession()}
+              style={{ color: "var(--v-rose)", borderColor: "rgba(244, 63, 94, 0.3)" }}
+              title="Disconnect Playwright browser session"
+            >
+              <Power size={13} /> Disconnect
+            </button>
+
             <button type="button" onClick={onClose} className="sb-icon-btn" aria-label="Close">
               <X size={16} />
             </button>
@@ -262,19 +386,19 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
         ========================================================================= */}
         <div
           style={{
-            padding: "8px 20px",
+            padding: "7px 20px",
             background: "var(--v-surface-2)",
             borderBottom: "1px solid var(--v-border)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            fontSize: "0.76rem",
+            fontSize: "0.75rem",
             color: "var(--v-text-secondary)",
             gap: 16,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, overflow: "hidden" }}>
-            <span style={{ fontWeight: 600, color: "var(--v-text-muted)" }}>CURRENT PAGE:</span>
+            <span style={{ fontWeight: 600, color: "var(--v-text-muted)" }}>LIVE PAGE:</span>
             <span
               style={{
                 fontFamily: "monospace",
@@ -294,25 +418,84 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
             </span>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            {/* Quick Page Jump buttons */}
+            <div style={{ display: "flex", alignItems: "center", gap: 4, background: "var(--v-surface)", padding: "2px 6px", borderRadius: 6, border: "1px solid var(--v-border)" }}>
+              <span style={{ fontSize: "0.68rem", fontWeight: 700, color: "var(--v-text-muted)", padding: "0 4px" }}>JUMP TO:</span>
+              <button
+                type="button"
+                className="button button-small button-secondary"
+                style={{
+                  fontSize: "0.72rem",
+                  padding: "3px 8px",
+                  height: "auto",
+                  background: inspectData?.page_url.includes("home") ? "var(--v-accent-light)" : undefined,
+                  borderColor: inspectData?.page_url.includes("home") ? "var(--v-accent)" : undefined,
+                  color: inspectData?.page_url.includes("home") ? "var(--v-accent)" : undefined,
+                  fontWeight: inspectData?.page_url.includes("home") ? 700 : 500,
+                }}
+                onClick={() => void handleInteractiveAction("click", "Home")}
+                disabled={interactLoading || loading || replayingSteps}
+                title="Navigate to Home"
+              >
+                🏠 Home
+              </button>
+              <button
+                type="button"
+                className="button button-small button-secondary"
+                style={{
+                  fontSize: "0.72rem",
+                  padding: "3px 8px",
+                  height: "auto",
+                  background: inspectData?.page_url.includes("timesheet") ? "var(--v-accent-light)" : undefined,
+                  borderColor: inspectData?.page_url.includes("timesheet") ? "var(--v-accent)" : undefined,
+                  color: inspectData?.page_url.includes("timesheet") ? "var(--v-accent)" : undefined,
+                  fontWeight: inspectData?.page_url.includes("timesheet") ? 700 : 500,
+                }}
+                onClick={() => void handleInteractiveAction("click", "My Timesheet")}
+                disabled={interactLoading || loading || replayingSteps}
+                title="Navigate inside My Timesheet page"
+              >
+                📅 My Timesheet
+              </button>
+              <button
+                type="button"
+                className="button button-small button-secondary"
+                style={{
+                  fontSize: "0.72rem",
+                  padding: "3px 8px",
+                  height: "auto",
+                  background: inspectData?.page_url.includes("whereabouts") ? "var(--v-accent-light)" : undefined,
+                  borderColor: inspectData?.page_url.includes("whereabouts") ? "var(--v-accent)" : undefined,
+                  color: inspectData?.page_url.includes("whereabouts") ? "var(--v-accent)" : undefined,
+                  fontWeight: inspectData?.page_url.includes("whereabouts") ? 700 : 500,
+                }}
+                onClick={() => void handleInteractiveAction("click", "Whereabouts")}
+                disabled={interactLoading || loading || replayingSteps}
+                title="Navigate to Whereabouts"
+              >
+                📍 Whereabouts
+              </button>
+            </div>
+
             {/* Quick Login button if on login page */}
             {inspectData?.page_url.includes("login") && !inspectData?.authenticated && (
               <button
                 type="button"
                 onClick={() => void handleInteractiveAction("login")}
-                disabled={interactLoading || loading}
+                disabled={interactLoading || loading || replayingSteps}
                 className="button button-small"
                 style={{
                   background: "var(--v-accent)",
                   color: "#fff",
-                  fontSize: "0.75rem",
+                  fontSize: "0.74rem",
                   padding: "4px 10px",
                   display: "flex",
                   alignItems: "center",
                   gap: 5,
                 }}
               >
-                <LogIn size={13} /> Log In with Vault to Inspect Dashboard
+                <LogIn size={13} /> Log In with Vault
               </button>
             )}
 
@@ -320,21 +503,62 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
             <button
               type="button"
               onClick={() => void handleInteractiveAction("expand_nav")}
-              disabled={interactLoading || loading}
+              disabled={interactLoading || loading || replayingSteps}
               className="button button-secondary button-small"
-              style={{ fontSize: "0.75rem", padding: "4px 10px", display: "flex", alignItems: "center", gap: 5 }}
+              style={{ fontSize: "0.74rem", padding: "4px 10px", display: "flex", alignItems: "center", gap: 5 }}
             >
-              <Compass size={13} /> Expand Nav Tree
+              <Compass size={13} /> Expand Nav
             </button>
           </div>
         </div>
+
+        {/* Dynamic Modal / Dialog Active Banner */}
+        {inspectData?.has_open_dialog && (
+          <div
+            style={{
+              padding: "7px 20px",
+              background: "rgba(99, 102, 241, 0.08)",
+              borderBottom: "1px solid rgba(99, 102, 241, 0.22)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: "0.78rem",
+              color: "var(--v-accent)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <Sparkles size={14} style={{ color: "var(--v-accent)" }} />
+              <span>
+                <strong>Dynamic Dialog Active:</strong> &ldquo;{inspectData.active_dialog_title || "Modal Dialog"}&rdquo;
+              </span>
+              <span style={{ fontSize: "0.72rem", color: "var(--v-text-secondary)" }}>
+                ({dialogElementsCount} field{dialogElementsCount === 1 ? "" : "s"} ready for selection)
+              </span>
+            </div>
+            <button
+              type="button"
+              className="button button-small"
+              style={{
+                padding: "3px 10px",
+                fontSize: "0.72rem",
+                background: categoryFilter === "dialog" ? "var(--v-accent)" : "var(--v-surface)",
+                color: categoryFilter === "dialog" ? "#fff" : "var(--v-accent)",
+                borderColor: "var(--v-accent)",
+                fontWeight: 600,
+              }}
+              onClick={() => setCategoryFilter(categoryFilter === "dialog" ? "all" : "dialog")}
+            >
+              {categoryFilter === "dialog" ? "Showing Dialog Only ✓" : "Filter to Dialog Fields"}
+            </button>
+          </div>
+        )}
 
         {/* =========================================================================
             SEARCH & CATEGORY TABS
         ========================================================================= */}
         <div
           style={{
-            padding: "10px 20px",
+            padding: "8px 20px",
             borderBottom: "1px solid var(--v-border)",
             display: "flex",
             alignItems: "center",
@@ -347,6 +571,9 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
           <div style={{ display: "flex", gap: 6 }}>
             {[
               { id: "all", label: `All (${inspectData?.categories_count?.total || 0})` },
+              ...(hasDialogElements
+                ? [{ id: "dialog", label: `✨ Dialog Fields (${dialogElementsCount})` }]
+                : []),
               { id: "button", label: `Buttons (${inspectData?.categories_count?.buttons || 0})` },
               { id: "link", label: `Navigation (${inspectData?.categories_count?.links || 0})` },
               { id: "input", label: `Inputs (${inspectData?.categories_count?.inputs || 0})` },
@@ -359,7 +586,7 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                 style={{
                   padding: "4px 10px",
                   borderRadius: 6,
-                  fontSize: "0.75rem",
+                  fontSize: "0.74rem",
                   fontWeight: categoryFilter === cat.id ? 700 : 500,
                   border: "none",
                   cursor: "pointer",
@@ -505,14 +732,18 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                               ? "2px solid #10b981"
                               : isHovered
                               ? "2px solid #6366f1"
+                              : el.in_dialog
+                              ? "1px dashed #ec4899"
                               : "1px dashed rgba(99, 102, 241, 0.4)",
                             background: isSelected
                               ? "rgba(16, 185, 129, 0.22)"
                               : isHovered
                               ? "rgba(99, 102, 241, 0.2)"
+                              : el.in_dialog
+                              ? "rgba(236, 72, 153, 0.08)"
                               : "rgba(99, 102, 241, 0.04)",
                             borderRadius: 3,
-                            zIndex: isSelected ? 30 : isHovered ? 25 : 10,
+                            zIndex: isSelected ? 30 : isHovered ? 25 : el.in_dialog ? 15 : 10,
                           }}
                           title={el.friendly_name}
                         >
@@ -524,7 +755,7 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                                 bottom: "100%",
                                 left: 0,
                                 marginBottom: 4,
-                                background: isSelected ? "#059669" : "#4f46e5",
+                                background: isSelected ? "#059669" : el.in_dialog ? "#db2777" : "#4f46e5",
                                 color: "#fff",
                                 padding: "2px 7px",
                                 borderRadius: 4,
@@ -539,6 +770,7 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                               }}
                             >
                               {isSelected && <Check size={10} />}
+                              {el.in_dialog && <span>[Dialog]</span>}
                               {el.friendly_name}
                             </div>
                           )}
@@ -560,8 +792,16 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                           style={{
                             padding: 12,
                             borderRadius: 8,
-                            border: isSelected ? "2px solid var(--v-emerald)" : "1px solid var(--v-border)",
-                            background: isSelected ? "rgba(16, 185, 129, 0.06)" : "var(--v-surface)",
+                            border: isSelected
+                              ? "2px solid var(--v-emerald)"
+                              : el.in_dialog
+                              ? "1px solid rgba(236, 72, 153, 0.4)"
+                              : "1px solid var(--v-border)",
+                            background: isSelected
+                              ? "rgba(16, 185, 129, 0.06)"
+                              : el.in_dialog
+                              ? "rgba(236, 72, 153, 0.03)"
+                              : "var(--v-surface)",
                             cursor: "pointer",
                             display: "flex",
                             alignItems: "center",
@@ -576,8 +816,8 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                                 width: 28,
                                 height: 28,
                                 borderRadius: 6,
-                                background: "var(--v-surface-2)",
-                                color: "var(--v-accent)",
+                                background: el.in_dialog ? "rgba(236, 72, 153, 0.1)" : "var(--v-surface-2)",
+                                color: el.in_dialog ? "#db2777" : "var(--v-accent)",
                                 display: "flex",
                                 alignItems: "center",
                                 justifyContent: "center",
@@ -587,11 +827,18 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                               {getCategoryIcon(el.category)}
                             </div>
                             <div style={{ overflow: "hidden" }}>
-                              <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-                                {el.friendly_name}
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                                  {el.friendly_name}
+                                </span>
+                                {el.in_dialog && (
+                                  <span style={{ fontSize: "0.62rem", padding: "1px 5px", borderRadius: 3, background: "rgba(236, 72, 153, 0.15)", color: "#db2777", fontWeight: 700 }}>
+                                    Dialog
+                                  </span>
+                                )}
                               </div>
                               <div style={{ fontSize: "0.72rem", color: "var(--v-text-muted)", fontFamily: "monospace" }}>
-                                {el.locator_strategy}: "{el.locator_value}"
+                                {el.locator_strategy}: &quot;{el.locator_value}&quot;
                               </div>
                             </div>
                           </div>
@@ -606,7 +853,7 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
               {/* Sidebar with Selected Element Details & Confirmation */}
               <div
                 style={{
-                  width: 320,
+                  width: 330,
                   borderLeft: "1px solid var(--v-border)",
                   background: "var(--v-surface)",
                   display: "flex",
@@ -636,8 +883,8 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                             style={{
                               padding: "2px 6px",
                               borderRadius: 4,
-                              background: "rgba(99, 102, 241, 0.12)",
-                              color: "var(--v-accent)",
+                              background: selectedElement.in_dialog ? "rgba(236, 72, 153, 0.15)" : "rgba(99, 102, 241, 0.12)",
+                              color: selectedElement.in_dialog ? "#db2777" : "var(--v-accent)",
                               fontSize: "0.68rem",
                               fontWeight: 700,
                               textTransform: "uppercase",
@@ -645,8 +892,13 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                           >
                             {selectedElement.category}
                           </span>
-                          <span style={{ fontSize: "0.7rem", color: "var(--v-text-muted)" }}>
-                            Tag: &lt;{selectedElement.tag}&gt;
+                          {selectedElement.in_dialog && (
+                            <span style={{ fontSize: "0.68rem", color: "#db2777", fontWeight: 600 }}>
+                              Inside Dialog
+                            </span>
+                          )}
+                          <span style={{ fontSize: "0.7rem", color: "var(--v-text-muted)", marginLeft: "auto" }}>
+                            &lt;{selectedElement.tag || selectedElement.tag_name || "element"}&gt;
                           </span>
                         </div>
                         <div style={{ fontSize: "0.9rem", fontWeight: 700, color: "var(--v-text)", wordBreak: "break-word" }}>
@@ -668,9 +920,10 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                               fontFamily: "monospace",
                               color: "var(--v-text)",
                               fontSize: "0.73rem",
+                              wordBreak: "break-all",
                             }}
                           >
-                            {selectedElement.locator_strategy}: "{selectedElement.locator_value}"
+                            {selectedElement.locator_strategy}: &quot;{selectedElement.locator_value}&quot;
                           </code>
                         </div>
 
@@ -681,17 +934,24 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                           </div>
                         )}
 
+                        {selectedElement.dialog_title && (
+                          <div>
+                            <span style={{ color: "var(--v-text-muted)" }}>Dialog Context: </span>
+                            <span style={{ fontWeight: 600, color: "#db2777" }}>&ldquo;{selectedElement.dialog_title}&rdquo;</span>
+                          </div>
+                        )}
+
                         {selectedElement.label && (
                           <div>
                             <span style={{ color: "var(--v-text-muted)" }}>Associated Label: </span>
-                            <span style={{ fontWeight: 600, color: "var(--v-text)" }}>"{selectedElement.label}"</span>
+                            <span style={{ fontWeight: 600, color: "var(--v-text)" }}>&ldquo;{selectedElement.label}&rdquo;</span>
                           </div>
                         )}
 
                         {selectedElement.placeholder && (
                           <div>
                             <span style={{ color: "var(--v-text-muted)" }}>Placeholder: </span>
-                            <span style={{ fontWeight: 600, color: "var(--v-text)" }}>"{selectedElement.placeholder}"</span>
+                            <span style={{ fontWeight: 600, color: "var(--v-text)" }}>&ldquo;{selectedElement.placeholder}&rdquo;</span>
                           </div>
                         )}
 
@@ -713,13 +973,38 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                     </div>
                   ) : (
                     <div style={{ padding: "24px 12px", textAlign: "center", color: "var(--v-text-muted)", fontSize: "0.78rem" }}>
-                      Click on any element in the page preview to inspect its properties and select it.
+                      Click on any element in the page preview or choose from the list to inspect its properties.
                     </div>
                   )}
                 </div>
 
-                {/* Bottom confirmation button */}
-                <div style={{ borderTop: "1px solid var(--v-border)", paddingTop: 14, marginTop: 14 }}>
+                {/* Bottom confirmation & interactive navigation buttons */}
+                <div style={{ borderTop: "1px solid var(--v-border)", paddingTop: 14, marginTop: 14, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {selectedElement && (selectedElement.category === "link" || selectedElement.category === "button" || selectedElement.role === "treeitem" || selectedElement.role === "button") && (
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      style={{
+                        width: "100%",
+                        justifyContent: "center",
+                        padding: "8px 12px",
+                        fontSize: "0.78rem",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        background: "var(--v-surface-2)",
+                        borderColor: "var(--v-accent)",
+                        color: "var(--v-accent)",
+                        fontWeight: 600,
+                      }}
+                      disabled={interactLoading || loading || replayingSteps}
+                      onClick={() => void handleInteractiveAction("click", selectedElement.locator_value || selectedElement.text)}
+                    >
+                      <Compass size={14} className={interactLoading ? "spin" : ""} />
+                      {interactLoading ? "Opening in Live Browser..." : `👉 Click & Open in Live Browser`}
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     disabled={!selectedElement}
@@ -740,6 +1025,13 @@ export const ElementPickerModal: React.FC<ElementPickerModalProps> = ({
                   >
                     <Check size={16} /> Use Selected Element
                   </button>
+                  <button type="button" className="button button-secondary" disabled={!selectedElement || savingElement} onClick={() => { setError(null); setRegistryName(""); setShowRegistryForm(true); }}>Save to registry</button>
+                  {showRegistryForm && <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <input autoFocus aria-label="Registry element name" placeholder="Element name (e.g. apex_signin_btn)" maxLength={120} value={registryName} onChange={e=>setRegistryName(e.target.value)} onKeyDown={e=>{if(e.key==="Enter") void saveSelectedElement();if(e.key==="Escape")setShowRegistryForm(false);}} />
+                    <button type="button" className="button button-primary" disabled={savingElement || !registryName.trim()} onClick={()=>void saveSelectedElement()}>{savingElement?"Saving...":"Save"}</button>
+                    <button type="button" className="button button-secondary" disabled={savingElement} onClick={()=>setShowRegistryForm(false)}>Cancel</button>
+                  </div>}
+                  {registryToast && <div role="status" style={{color:"var(--v-emerald)",fontSize:"0.78rem",textAlign:"center"}}>{registryToast}</div>}
                 </div>
               </div>
             </div>

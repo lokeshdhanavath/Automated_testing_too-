@@ -1,33 +1,34 @@
 """
-Veriqon Element Inspector API
-Provides real-time element discovery, visual inspection, and interactive element picking
-for registered web applications using Playwright.
+Veriqon High-Performance Element Inspector API
+Provides instant, real-time element discovery, visual inspection, persistent browser sessions,
+interactive element picking, and dynamic modal/dialog element selection for web applications.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import time
 from typing import Any, Dict, List, Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page, Playwright
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
+
+from datetime import datetime
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from app.database import get_db
 from app import db_service, credentials_service
-from app.scenario_engine import ensure_navigation_expanded, robust_click, resolve_locator_safely
+from app.models.elements import AppElement
 
 logger = logging.getLogger("veriqon.inspector")
 
 router = APIRouter(prefix="/api/inspector", tags=["Element Inspector"])
 
-# Global session cache for active inspection sessions: project_id -> session dict
-active_inspector_sessions: Dict[str, Dict[str, Any]] = {}
-
-# Client-side DOM scanner script
+# Client-side DOM scanner script with modal/dialog detection and scoped locators
 DOM_SCANNER_SCRIPT = """() => {
     function getAssociatedLabel(el) {
         if (el.id) {
@@ -59,16 +60,25 @@ DOM_SCANNER_SCRIPT = """() => {
         const role = (el.getAttribute('role') || '').toLowerCase();
         const type = (el.getAttribute('type') || '').toLowerCase();
 
-        if (tag === 'button' || role === 'button' || ['submit', 'button', 'reset'].includes(type)) {
+        if (tag === 'button' || role === 'button' || ['submit', 'button', 'reset'].includes(type) || el.classList.contains('t-Button') || el.classList.contains('project-option')) {
             return 'button';
         }
-        if (tag === 'a' || ['link', 'treeitem', 'menuitem', 'tab'].includes(role)) {
+        if (
+            tag === 'a' ||
+            ['link', 'treeitem', 'menuitem', 'tab'].includes(role) ||
+            el.closest('.a-TreeView') ||
+            el.closest('#t_TreeNav') ||
+            el.closest('.t-Body-nav') ||
+            el.closest('nav') ||
+            el.classList.contains('a-TreeView-label') ||
+            el.classList.contains('nav-link')
+        ) {
             return 'link';
         }
         if (tag === 'select' || role === 'combobox' || role === 'listbox') {
             return 'select';
         }
-        if (tag === 'textarea' || (tag === 'input' && !['checkbox', 'radio', 'hidden', 'submit', 'button'].includes(type))) {
+        if (tag === 'textarea' || tag === 'input' || el.classList.contains('hours-input') || el.classList.contains('project-name')) {
             return 'input';
         }
         if (type === 'checkbox' || role === 'checkbox') return 'checkbox';
@@ -76,9 +86,42 @@ DOM_SCANNER_SCRIPT = """() => {
         return 'other';
     }
 
+    // Modal & Dialog detection
+    const dialogSelectors = [
+        'dialog',
+        '[role="dialog"]',
+        '.ui-dialog',
+        '.modal',
+        '.t-Dialog-page',
+        '.project-picker',
+        '.popup-content',
+        '.a-Dialog',
+        '.modal-dialog',
+        '.fade.show',
+        '.ui-widget-overlay',
+    ];
+
+    const visibleDialogs = Array.from(document.querySelectorAll(dialogSelectors.join(','))).filter(d => {
+        try {
+            const s = window.getComputedStyle(d);
+            const r = d.getBoundingClientRect();
+            return s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity) > 0 && r.width > 0 && r.height > 0;
+        } catch (e) {
+            return false;
+        }
+    });
+
+    const hasOpenDialog = visibleDialogs.length > 0;
+    let activeDialogTitle = '';
+    if (hasOpenDialog) {
+        const topDialog = visibleDialogs[visibleDialogs.length - 1];
+        const titleEl = topDialog.querySelector('.ui-dialog-title, .modal-title, h1, h2, h3, h4, [role="heading"]');
+        activeDialogTitle = titleEl ? titleEl.innerText.trim() : (topDialog.getAttribute('aria-label') || 'Modal Dialog');
+    }
+
     const interactiveSelectors = [
         'button',
-        'a[href]',
+        'a',
         'input:not([type="hidden"])',
         'select',
         'textarea',
@@ -90,6 +133,28 @@ DOM_SCANNER_SCRIPT = """() => {
         '[role="checkbox"]',
         '[role="combobox"]',
         '.a-TreeView-label',
+        '.a-TreeView-content',
+        '.t-TreeNav-item',
+        '.t-Button',
+        '.hours-input',
+        '.timesheet-header',
+        '.timesheet-date',
+        '.daily-total',
+        '.project-name',
+        '.project-option',
+        '.project-picker-close',
+        '#close_project_picker',
+        '.assigned-project-name',
+        '.mon-hours',
+        '.tue-hours',
+        '.wed-hours',
+        '.thu-hours',
+        '.fri-hours',
+        '.sat-hours',
+        '.sun-hours',
+        'nav a',
+        'aside a',
+        '.nav-link',
         '[data-action]'
     ].join(',');
 
@@ -100,10 +165,13 @@ DOM_SCANNER_SCRIPT = """() => {
     let counter = 1;
     for (const el of elements) {
         const rect = el.getBoundingClientRect();
-        // Skip invisible or zero-size elements
-        if (rect.width <= 0 || rect.height <= 0 || el.offsetParent === null) continue;
+        // Skip zero-size elements
+        if (rect.width <= 0 || rect.height <= 0) continue;
         const style = window.getComputedStyle(el);
         if (style.visibility === 'hidden' || style.display === 'none' || parseFloat(style.opacity) === 0) continue;
+
+        // Skip disconnected elements
+        if (!el.isConnected) continue;
 
         const tag = el.tagName.toLowerCase();
         const role = el.getAttribute('role') || (tag === 'button' ? 'button' : tag === 'a' ? 'link' : tag === 'input' ? 'textbox' : '');
@@ -115,182 +183,1642 @@ DOM_SCANNER_SCRIPT = """() => {
         const type = el.getAttribute('type') || '';
         const category = getElementCategory(el);
 
-        let accessibleName = label || text || placeholder || id || name;
-        if (accessibleName.length > 50) accessibleName = accessibleName.substring(0, 50) + '...';
+        // Check if inside a dialog/modal container
+        const parentDialog = el.closest('dialog, [role="dialog"], .ui-dialog, .modal, .t-Dialog-page, .project-picker, .popup-content, .a-Dialog');
+        const inDialog = !!parentDialog;
+        let elementDialogTitle = '';
+        if (inDialog) {
+            const dt = parentDialog.querySelector('.ui-dialog-title, .modal-title, h1, h2, h3, h4');
+            elementDialogTitle = dt ? dt.innerText.trim() : (parentDialog.getAttribute('aria-label') || activeDialogTitle || 'Dialog');
+        }
 
-        let categoryPrefix = 'Element';
-        if (category === 'button') categoryPrefix = 'Button';
-        else if (category === 'link') categoryPrefix = role === 'treeitem' ? 'Menu Item' : 'Link';
-        else if (category === 'input') categoryPrefix = 'Input Field';
-        else if (category === 'select') categoryPrefix = 'Dropdown';
-        else if (category === 'checkbox') categoryPrefix = 'Checkbox';
+        // Custom friendly names for APEX Timesheet elements
+        let customName = '';
+        let customLocatorStrategy = '';
+        let customLocatorValue = '';
 
-        const friendlyName = accessibleName ? `${categoryPrefix}: "${accessibleName}"` : `${categoryPrefix} (${tag})`;
+        if (id === 'p4-current') {
+            customName = 'This Week';
+        } else if (id === 'p4-previous') {
+            customName = 'Last Week';
+        } else if (id === 'p4-next') {
+            customName = 'Next Week';
+        } else if (id === 'add_project_btn') {
+            customName = '+ Add Project';
+        } else if (id === 'save') {
+            customName = 'Save Timesheet';
+        } else if (id === 'delete_project_btn') {
+            customName = 'Delete Project';
+        } else if (id === 'whereabouts') {
+            customName = 'Whereabouts';
+        } else if (id === 'close_project_picker' || el.classList.contains('project-picker-close')) {
+            customName = 'Close Project Picker';
+            customLocatorStrategy = 'css';
+            customLocatorValue = '#close_project_picker, .project-picker-close';
+        } else if (id === 'mon_total') {
+            customName = 'Monday Total';
+        } else if (id === 'tue_total') {
+            customName = 'Tuesday Total';
+        } else if (id === 'wed_total') {
+            customName = 'Wednesday Total';
+        } else if (id === 'thu_total') {
+            customName = 'Thursday Total';
+        } else if (id === 'fri_total') {
+            customName = 'Friday Total';
+        } else if (id === 'weekly_total') {
+            customName = 'Weekly Total Hours';
+        }
+
+        // Project Option cards (modal popup)
+        if (el.classList.contains('project-option') || el.closest('.project-option')) {
+            const cleanTitle = text.replace(/[\\u25a0-\\u25ff\\u203a\\n\\r]+/g, ' ').replace(/\\s+/g, ' ').trim();
+            customName = `Project Option: "${cleanTitle}"`;
+            customLocatorStrategy = 'text';
+            customLocatorValue = cleanTitle;
+        }
+
+        // Assigned project name field
+        if (el.classList.contains('assigned-project-name') || (el.classList.contains('project-name') && tag === 'input')) {
+            customName = 'Assigned Project Name';
+            customLocatorStrategy = 'css';
+            customLocatorValue = 'input.project-name';
+        }
+
+        // Monday-Sunday Hours inputs with specific classes
+        if (el.classList.contains('mon-hours')) {
+            customName = 'Monday Hours';
+            customLocatorStrategy = 'css';
+            customLocatorValue = '.hours-input.mon-hours';
+        } else if (el.classList.contains('tue-hours')) {
+            customName = 'Tuesday Hours';
+            customLocatorStrategy = 'css';
+            customLocatorValue = '.hours-input.tue-hours';
+        } else if (el.classList.contains('wed-hours')) {
+            customName = 'Wednesday Hours';
+            customLocatorStrategy = 'css';
+            customLocatorValue = '.hours-input.wed-hours';
+        } else if (el.classList.contains('thu-hours')) {
+            customName = 'Thursday Hours';
+            customLocatorStrategy = 'css';
+            customLocatorValue = '.hours-input.thu-hours';
+        } else if (el.classList.contains('fri-hours')) {
+            customName = 'Friday Hours';
+            customLocatorStrategy = 'css';
+            customLocatorValue = '.hours-input.fri-hours';
+        } else if (el.classList.contains('sat-hours')) {
+            customName = 'Saturday Hours';
+            customLocatorStrategy = 'css';
+            customLocatorValue = '.hours-input.sat-hours';
+        } else if (el.classList.contains('sun-hours')) {
+            customName = 'Sunday Hours';
+            customLocatorStrategy = 'css';
+            customLocatorValue = '.hours-input.sun-hours';
+        } else if (el.classList.contains('hours-input') || el.closest('.hour-cell') || el.closest('.timesheet-grid')) {
+            const allHours = Array.from(document.querySelectorAll('.hours-input, .hour-cell input, .timesheet-grid input[type="text"], .timesheet-grid input:not([type="hidden"])'));
+            const idx = allHours.indexOf(el);
+            if (idx >= 0) {
+                const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                const dayName = days[idx % 7];
+                const rowNum = Math.floor(idx / 7) + 1;
+                customName = `${dayName} Hours (Row ${rowNum})`;
+            }
+        }
+
+        // Filter out technical dummy elements that aren't real user controls
+        const isTechnicalId = (val) => {
+            if (!val) return false;
+            const l = val.toLowerCase();
+            return l.includes('dummy') || l.startsWith('pflow') || l.startsWith('pinstance') || l.startsWith('apex_') || l === 't_body_skiptocontent';
+        };
+
+        if (id && isTechnicalId(id) && !label && !text && !placeholder) {
+            continue; // Skip invisible system dummy controls
+        }
+
+        // Natural Name Builder: human-readable without technical prefixes
+        function formatNaturalName(base, cat, inDiag) {
+            let n = base.trim().replace(/^[\+\-\*\•\s]+/, '').trim();
+            const lower = n.toLowerCase();
+            if (cat === 'button') {
+                return lower.includes('button') ? n : `${n} button`;
+            }
+            if (cat === 'link') {
+                return lower.includes('link') || lower.includes('menu') ? n : `${n} link`;
+            }
+            if (cat === 'input') {
+                if (lower.includes('field') || lower.includes('input') || lower.includes('hours')) return n;
+                return `${n} field`;
+            }
+            if (cat === 'select') {
+                return lower.includes('dropdown') || lower.includes('select') ? n : `${n} dropdown`;
+            }
+            if (cat === 'checkbox') {
+                return lower.includes('checkbox') ? n : `${n} checkbox`;
+            }
+            if (cat === 'radio') {
+                return lower.includes('radio') ? n : `${n} radio option`;
+            }
+            return n;
+        }
+
+        function buildDescription(name, cat, txt, ph, lbl) {
+            const l = name.toLowerCase();
+            if (l.includes('save')) return 'Saves the current form or timesheet';
+            if (l.includes('add project')) return 'Adds a new project row or opens project selector';
+            if (l.includes('delete project')) return 'Deletes the selected project entry';
+            if (l.includes('this week')) return 'Switches timesheet view to the current week';
+            if (l.includes('last week')) return 'Switches timesheet view to the previous week';
+            if (l.includes('next week')) return 'Switches timesheet view to the next week';
+            if (l.includes('whereabouts')) return 'Opens user whereabouts view';
+            if (l.includes('monday hours')) return "Input for entering Monday's working hours";
+            if (l.includes('tuesday hours')) return "Input for entering Tuesday's working hours";
+            if (l.includes('wednesday hours')) return "Input for entering Wednesday's working hours";
+            if (l.includes('thursday hours')) return "Input for entering Thursday's working hours";
+            if (l.includes('friday hours')) return "Input for entering Friday's working hours";
+            if (l.includes('saturday hours')) return "Input for entering Saturday's working hours";
+            if (l.includes('sunday hours')) return "Input for entering Sunday's working hours";
+            if (l.includes('my timesheet')) return 'Opens the My Timesheet page';
+            if (l.includes('search')) return 'Enter a search term';
+            if (l.includes('project name')) return 'Field for entering or selecting a project name';
+            if (l.includes('sign in') || l.includes('log in')) return 'Submits credentials to sign in';
+            if (l.includes('username') || l.includes('user name')) return 'Enter your username or email';
+            if (l.includes('password')) return 'Enter your password';
+
+            if (cat === 'button') return `Clicks the ${name.replace(/ button$/i, '')} button`;
+            if (cat === 'link') return `Navigates to ${name.replace(/ link$/i, '')}`;
+            if (cat === 'input') return ph ? `Enter ${ph}` : lbl ? `Input for ${lbl}` : 'Enter text';
+            if (cat === 'select') return 'Select an option from the dropdown';
+            if (cat === 'checkbox') return 'Toggles checkbox option';
+            return 'Interactive control';
+        }
+
+        let baseName = customName || label || text || placeholder;
+        if (!baseName && id && !isTechnicalId(id) && id.length < 25) {
+            baseName = id.replace(/[-_]+/g, ' ').trim();
+        }
+
+        let friendlyName = '';
+        if (baseName) {
+            friendlyName = formatNaturalName(baseName, category, inDialog);
+        } else {
+            if (category === 'button') friendlyName = 'Button without a label';
+            else if (category === 'input') friendlyName = placeholder ? `${placeholder} field` : 'Unnamed text field';
+            else if (category === 'link') friendlyName = 'Unnamed link';
+            else if (category === 'select') friendlyName = 'Unnamed dropdown';
+            else if (category === 'checkbox') friendlyName = 'Unnamed checkbox';
+            else friendlyName = 'Unnamed control';
+        }
+
+        if (friendlyName.length > 55) friendlyName = friendlyName.substring(0, 55) + '...';
+        const description = buildDescription(friendlyName, category, text, placeholder, label);
 
         // Determine best locator strategy
-        let locatorStrategy = 'smart';
-        let locatorValue = '';
+        let locatorStrategy = customLocatorStrategy || 'smart';
+        let locatorValue = customLocatorValue || '';
 
-        if (role && text && text.length <= 40) {
-            locatorStrategy = 'role';
-            locatorValue = role === 'link' || role === 'button' || role === 'treeitem' ? text : `${role}:${text}`;
-        } else if (label && label.length <= 40) {
-            locatorStrategy = 'label';
-            locatorValue = label;
-        } else if (placeholder) {
-            locatorStrategy = 'placeholder';
-            locatorValue = placeholder;
-        } else if (text && text.length <= 30 && !text.includes('\\n')) {
-            locatorStrategy = 'text';
-            locatorValue = text;
-        } else if (id && !id.startsWith('a-') && !id.startsWith('B') && id.length < 35) {
-            locatorStrategy = 'id';
-            locatorValue = id;
-        } else if (name) {
-            locatorStrategy = 'name';
-            locatorValue = name;
-        } else {
-            locatorStrategy = 'css';
-            locatorValue = id ? `#${id}` : tag;
+        if (!locatorValue) {
+            if (id && !id.startsWith('a-') && !id.startsWith('B') && id.length < 35) {
+                locatorStrategy = 'id';
+                locatorValue = id;
+            } else if (customName && id) {
+                locatorStrategy = 'id';
+                locatorValue = id;
+            } else if (inDialog && text && text.length <= 35) {
+                // Scope locator to dialog container
+                locatorStrategy = 'css';
+                const dTag = parentDialog.tagName.toLowerCase();
+                const dClass = parentDialog.className ? parentDialog.className.split(' ').filter(c => c && !c.includes(':'))[0] : '';
+                const dPrefix = dClass ? `.${dClass}` : dTag;
+                locatorValue = `${dPrefix} >> text="${text}"`;
+            } else if (el.classList.contains('hours-input')) {
+                const allHours = Array.from(document.querySelectorAll('.hours-input'));
+                const idx = allHours.indexOf(el);
+                locatorStrategy = 'css';
+                locatorValue = idx >= 0 ? `.hours-input:nth-of-type(${idx + 1})` : '.hours-input';
+            } else if ((role === 'treeitem' || el.closest('.a-TreeView')) && text && text.length <= 40) {
+                locatorStrategy = 'role';
+                locatorValue = text;
+            } else if (role && text && text.length <= 40) {
+                locatorStrategy = 'role';
+                locatorValue = role === 'link' || role === 'button' ? text : `${role}:${text}`;
+            } else if (label && label.length <= 40) {
+                locatorStrategy = 'label';
+                locatorValue = label;
+            } else if (placeholder) {
+                locatorStrategy = 'placeholder';
+                locatorValue = placeholder;
+            } else if (text && text.length <= 35 && !text.includes('\\n')) {
+                locatorStrategy = 'text';
+                locatorValue = text;
+            } else if (id && !id.startsWith('a-') && !id.startsWith('B') && id.length < 35) {
+                locatorStrategy = 'id';
+                locatorValue = id;
+            } else if (name) {
+                locatorStrategy = 'name';
+                locatorValue = name;
+            } else if (tag === 'a' && el.getAttribute('href') && !el.getAttribute('href').startsWith('#') && !el.getAttribute('href').startsWith('javascript:')) {
+                locatorStrategy = 'css';
+                locatorValue = `a[href="${el.getAttribute('href')}"]`;
+            } else if (id) {
+                locatorStrategy = 'id';
+                locatorValue = id;
+            } else {
+                locatorStrategy = 'css';
+                locatorValue = tag;
+            }
         }
 
-        const locKey = `${locatorStrategy}:${locatorValue}`;
-        const isDuplicate = seenLocators.has(locKey);
-        seenLocators.add(locKey);
-
-        let selectOptions = [];
-        if (tag === 'select') {
-            selectOptions = Array.from(el.querySelectorAll('option')).map(opt => ({
-                value: opt.value,
-                label: (opt.innerText || opt.textContent || '').trim()
-            }));
-        }
+        // Deduplication key
+        const dupKey = `${locatorStrategy}:${locatorValue}`;
+        if (seenLocators.has(dupKey)) continue;
+        seenLocators.add(dupKey);
 
         results.push({
-            id: `el-${counter++}`,
-            category,
-            tag,
-            role,
-            type,
-            text: text.substring(0, 80),
-            label,
-            placeholder,
+            id: `el_${counter++}`,
+            friendly_name: friendlyName,
+            description: description,
+            category: category,
+            tag_name: tag,
+            role: role || (category === 'link' && el.closest('.a-TreeView') ? 'treeitem' : undefined),
+            text: text,
+            label: label,
+            placeholder: placeholder,
             element_id: id,
             name_attr: name,
-            friendly_name: friendlyName,
+            type_attr: type,
             locator_strategy: locatorStrategy,
             locator_value: locatorValue,
-            is_ambiguous: isDuplicate,
-            options: selectOptions,
+            suggested_action: category === 'input' ? 'fill_input' : category === 'select' ? 'select_option' : category === 'link' ? 'navigate' : 'click_element',
+            in_dialog: inDialog,
+            dialog_title: elementDialogTitle,
             rect: {
-                x: Math.round(rect.left),
-                y: Math.round(rect.top),
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
                 width: Math.round(rect.width),
-                height: Math.round(rect.height)
+                height: Math.round(rect.height),
+                top: Math.round(rect.top),
+                left: Math.round(rect.left),
+                right: Math.round(rect.right),
+                bottom: Math.round(rect.bottom)
             }
         });
     }
 
-    return results;
+    return {
+        elements: results,
+        has_open_dialog: hasOpenDialog,
+        active_dialog_title: activeDialogTitle
+    };
 }"""
 
 
-class InspectRequest(BaseModel):
-    path: Optional[str] = None
-    with_login: bool = False
-    expand_navigation: bool = True
-    force_refresh: bool = False
-    viewport_width: int = 1440
-    viewport_height: int = 900
+def normalize_app_url(url: str) -> str:
+    """
+    Normalizes application URLs to their valid entry points:
+    Oracle Identity Cloud Service (IDCS):
+    A naked GET on /ui/v1/signin without OAuth query parameters displays:
+    'You cannot bookmark and access the /signin URL directly.'
+    Converting it to /ui/v1/myconsole ensures Oracle IDCS generates the OAuth
+    session parameters and renders the Sign-In page with username & password fields.
+    """
+    if not url:
+        return url
+    u = url.strip()
+    if "identity.oraclecloud.com" in u:
+        if u.endswith("/ui/v1/signin"):
+            u = u[:-len("/ui/v1/signin")] + "/ui/v1/myconsole"
+        elif u.endswith("/signin"):
+            u = u[:-len("/signin")] + "/ui/v1/myconsole"
+        elif "/ui/v1/signin?" not in u and not u.endswith("/ui/v1/myconsole"):
+            if u.endswith("/"):
+                u = u + "ui/v1/myconsole"
+            elif u.endswith(".oraclecloud.com"):
+                u = u + "/ui/v1/myconsole"
+    return u
+
+
+def clean_page_identity(url: str, page_title: str = "") -> tuple[str, str]:
+    """
+    Strips volatile session tokens (session=..., cs=..., state=..., nonce=...)
+    to form a canonical page URL for persistent element deduplication,
+    and derives a friendly human-readable page name.
+    """
+    if not url:
+        return "", "Home"
+    parsed = urlparse(url)
+    volatile_params = {"session", "cs", "tz", "state", "nonce", "code", "p_instance"}
+    query_dict = parse_qs(parsed.query, keep_blank_values=False)
+    filtered_query = {k: v for k, v in query_dict.items() if k.lower() not in volatile_params}
+    clean_query = urlencode(filtered_query, doseq=True)
+    clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", clean_query, ""))
+
+    clean_title = (page_title or "").strip()
+    if " - " in clean_title:
+        parts = clean_title.split(" - ")
+        page_name = parts[-1].strip() if len(parts[-1].strip()) > 2 else parts[0].strip()
+    elif " | " in clean_title:
+        parts = clean_title.split(" | ")
+        page_name = parts[0].strip()
+    elif clean_title:
+        page_name = clean_title
+    else:
+        last_seg = parsed.path.strip("/").split("/")[-1] if parsed.path.strip("/") else "Home"
+        page_name = last_seg.replace("-", " ").replace("_", " ").title()
+
+    return clean_url, page_name
+
+
+def redact_sensitive_url(url: str) -> str:
+    """
+    Redacts sensitive query parameters (tokens, passwords, session secrets, auth codes)
+    so they are never displayed in the UI or written to logs.
+    """
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        query_dict = parse_qs(parsed.query, keep_blank_values=True)
+        sensitive_keys = {
+            "session", "cs", "token", "access_token", "id_token", "auth",
+            "secret", "password", "code", "state", "nonce", "sig", "signature", "key"
+        }
+        redacted_query = {}
+        for k, vals in query_dict.items():
+            if k.lower() in sensitive_keys:
+                redacted_query[k] = ["[redacted]"]
+            else:
+                redacted_query[k] = vals
+        clean_query = urlencode(redacted_query, doseq=True)
+        return urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", clean_query, ""))
+    except Exception:
+        return url
+
+
+# Interactive Element Picker script (injected into target browser)
+PICKER_INJECTION_SCRIPT = """() => {
+    if (window.__VERIQON_REMOVE_PICKER__) {
+        try { window.__VERIQON_REMOVE_PICKER__(); } catch(e) {}
+    }
+    window.__VERIQON_PICKER_ACTIVE__ = true;
+    window.__VERIQON_PICKER_STATUS__ = "picking";
+    window.__VERIQON_PICKER_RESULT__ = null;
+
+    let overlay = document.getElementById('veriqon-picker-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'veriqon-picker-overlay';
+        overlay.style.position = 'fixed';
+        overlay.style.pointerEvents = 'none';
+        overlay.style.border = '2px solid #06b6d4';
+        overlay.style.backgroundColor = 'rgba(6, 182, 212, 0.18)';
+        overlay.style.borderRadius = '4px';
+        overlay.style.zIndex = '2147483647';
+        overlay.style.transition = 'all 0.05s ease';
+        overlay.style.display = 'none';
+        document.body.appendChild(overlay);
+    }
+
+    let badge = document.getElementById('veriqon-picker-badge');
+    if (!badge) {
+        badge = document.createElement('div');
+        badge.id = 'veriqon-picker-badge';
+        badge.style.position = 'fixed';
+        badge.style.pointerEvents = 'none';
+        badge.style.background = '#0f172a';
+        badge.style.color = '#38bdf8';
+        badge.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+        badge.style.fontSize = '12px';
+        badge.style.fontWeight = '600';
+        badge.style.padding = '4px 10px';
+        badge.style.borderRadius = '5px';
+        badge.style.boxShadow = '0 4px 14px rgba(0,0,0,0.4)';
+        badge.style.zIndex = '2147483647';
+        badge.style.display = 'none';
+        badge.style.whiteSpace = 'nowrap';
+        document.body.appendChild(badge);
+    }
+
+    function getAssociatedLabel(el) {
+        if (el.id) {
+            try {
+                const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+                if (lbl && lbl.innerText) return lbl.innerText.trim();
+            } catch (e) {}
+        }
+        const parentLabel = el.closest('label');
+        if (parentLabel && parentLabel.innerText) {
+            return parentLabel.innerText.replace(el.innerText || '', '').trim();
+        }
+        const ariaLabel = el.getAttribute('aria-label');
+        if (ariaLabel) return ariaLabel.trim();
+        const ariaLabelledBy = el.getAttribute('aria-labelledby');
+        if (ariaLabelledBy) {
+            try {
+                const byEl = document.getElementById(ariaLabelledBy);
+                if (byEl && byEl.innerText) return byEl.innerText.trim();
+            } catch (e) {}
+        }
+        const title = el.getAttribute('title');
+        if (title) return title.trim();
+        return '';
+    }
+
+    function getElementCategory(el) {
+        const tag = el.tagName.toLowerCase();
+        const role = (el.getAttribute('role') || '').toLowerCase();
+        const type = (el.getAttribute('type') || '').toLowerCase();
+
+        if (tag === 'button' || role === 'button' || ['submit', 'button', 'reset'].includes(type) || el.classList.contains('t-Button') || el.classList.contains('project-option')) {
+            return 'button';
+        }
+        if (tag === 'a' || ['link', 'treeitem', 'menuitem', 'tab'].includes(role) || el.closest('.a-TreeView') || el.classList.contains('a-TreeView-label') || el.classList.contains('nav-link')) {
+            return 'link';
+        }
+        if (tag === 'select' || role === 'combobox' || role === 'listbox') return 'select';
+        if (tag === 'textarea' || tag === 'input' || el.classList.contains('hours-input') || el.classList.contains('project-name')) return 'input';
+        if (type === 'checkbox' || role === 'checkbox') return 'checkbox';
+        if (type === 'radio' || role === 'radio') return 'radio';
+        return 'other';
+    }
+
+    function findInteractiveTarget(el) {
+        if (!el || el === document.body || el === document.documentElement) return null;
+        if (el.id === 'veriqon-picker-overlay' || el.id === 'veriqon-picker-badge') return null;
+        const candidate = el.closest('button, a, input:not([type="hidden"]), select, textarea, [role="button"], [role="link"], [role="treeitem"], [role="menuitem"], [role="tab"], [role="checkbox"], [role="radio"], [role="combobox"], .project-option, .t-Button, .a-TreeView-label, .hours-input, .project-name, .project-picker-close');
+        return candidate || el;
+    }
+
+    function buildFriendlyNameAndDesc(el, tag, category, role, label, text, placeholder) {
+        let name = '';
+        let desc = '';
+        const id = el.id || '';
+
+        if (id === 'p4-current') { name = 'This Week'; desc = 'Switches timesheet view to the current week'; }
+        else if (id === 'p4-previous') { name = 'Last Week'; desc = 'Switches timesheet view to the previous week'; }
+        else if (id === 'p4-next') { name = 'Next Week'; desc = 'Switches timesheet view to the next week'; }
+        else if (id === 'add_project_btn') { name = '+ Add Project'; desc = 'Adds a new project row or opens project selector'; }
+        else if (id === 'save') { name = 'Save Timesheet'; desc = 'Saves the current timesheet'; }
+        else if (id === 'delete_project_btn') { name = 'Delete Project'; desc = 'Deletes the selected project'; }
+        else if (id === 'whereabouts') { name = 'Whereabouts'; desc = 'Opens user whereabouts view'; }
+        else if (el.classList.contains('mon-hours')) { name = 'Monday Hours'; desc = "Input for Monday's working hours"; }
+        else if (el.classList.contains('tue-hours')) { name = 'Tuesday Hours'; desc = "Input for Tuesday's working hours"; }
+        else if (el.classList.contains('wed-hours')) { name = 'Wednesday Hours'; desc = "Input for Wednesday's working hours"; }
+        else if (el.classList.contains('thu-hours')) { name = 'Thursday Hours'; desc = "Input for Thursday's working hours"; }
+        else if (el.classList.contains('fri-hours')) { name = 'Friday Hours'; desc = "Input for Friday's working hours"; }
+        else if (el.classList.contains('sat-hours')) { name = 'Saturday Hours'; desc = "Input for Saturday's working hours"; }
+        else if (el.classList.contains('sun-hours')) { name = 'Sunday Hours'; desc = "Input for Sunday's working hours"; }
+        else if (el.classList.contains('project-option')) {
+            const clean = text.replace(/[\\u25a0-\\u25ff\\u203a\\n\\r]+/g, ' ').trim();
+            name = `Project Option: "${clean}"`;
+            desc = `Selects project "${clean}"`;
+        }
+
+        if (!name) {
+            const base = label || text || placeholder || id.replace(/[-_]+/g, ' ').trim();
+            const cleanBase = base.replace(/^[\+\-\*\•\s]+/, '').trim();
+            if (category === 'button') name = cleanBase.toLowerCase().includes('button') ? cleanBase : `${cleanBase} button`;
+            else if (category === 'link') name = cleanBase.toLowerCase().includes('link') ? cleanBase : `${cleanBase} link`;
+            else if (category === 'input') name = cleanBase.toLowerCase().includes('field') || cleanBase.toLowerCase().includes('input') || cleanBase.toLowerCase().includes('hours') ? cleanBase : `${cleanBase} field`;
+            else if (category === 'select') name = cleanBase.toLowerCase().includes('dropdown') ? cleanBase : `${cleanBase} dropdown`;
+            else if (category === 'checkbox') name = cleanBase.toLowerCase().includes('checkbox') ? cleanBase : `${cleanBase} checkbox`;
+            else name = cleanBase || `${tag} element`;
+
+            if (category === 'button') desc = `Clicks the ${cleanBase} button`;
+            else if (category === 'link') desc = `Navigates to ${cleanBase}`;
+            else if (category === 'input') desc = placeholder ? `Enter ${placeholder}` : label ? `Input for ${label}` : 'Enter text';
+            else if (category === 'select') desc = 'Select an option from dropdown';
+            else desc = 'Interactive control';
+        }
+
+        return { name, desc };
+    }
+
+    function determineLocators(el, tag, text, label, placeholder) {
+        if (el.id && !el.id.includes('dummy') && !el.id.startsWith('pflow') && el.id.length < 50) {
+            return { strategy: 'id', value: el.id };
+        }
+        if (el.classList.contains('mon-hours')) return { strategy: 'css', value: '.hours-input.mon-hours' };
+        if (el.classList.contains('tue-hours')) return { strategy: 'css', value: '.hours-input.tue-hours' };
+        if (el.classList.contains('wed-hours')) return { strategy: 'css', value: '.hours-input.wed-hours' };
+        if (el.classList.contains('thu-hours')) return { strategy: 'css', value: '.hours-input.thu-hours' };
+        if (el.classList.contains('fri-hours')) return { strategy: 'css', value: '.hours-input.fri-hours' };
+        if (el.classList.contains('sat-hours')) return { strategy: 'css', value: '.hours-input.sat-hours' };
+        if (el.classList.contains('sun-hours')) return { strategy: 'css', value: '.hours-input.sun-hours' };
+        if (el.classList.contains('project-option')) {
+            const clean = text.replace(/[\\u25a0-\\u25ff\\u203a\\n\\r]+/g, ' ').trim();
+            return { strategy: 'text', value: clean };
+        }
+        if (label) return { strategy: 'label', value: label };
+        if (placeholder) return { strategy: 'placeholder', value: placeholder };
+        if (text && text.length > 0 && text.length <= 40) return { strategy: 'text', value: text };
+
+        const nameAttr = el.getAttribute('name');
+        if (nameAttr) return { strategy: 'css', value: `[name="${CSS.escape(nameAttr)}"]` };
+
+        const cls = Array.from(el.classList).filter(c => !c.startsWith('js-') && !c.includes('active') && !c.includes('focus')).slice(0, 2).join('.');
+        if (cls) return { strategy: 'css', value: `${tag}.${cls}` };
+
+        return { strategy: 'css', value: tag };
+    }
+
+    function extractMetadata(el) {
+        const tag = el.tagName.toLowerCase();
+        const role = el.getAttribute('role') || (tag === 'button' ? 'button' : tag === 'a' ? 'link' : tag === 'input' ? 'textbox' : null);
+        const text = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ');
+        const label = getAssociatedLabel(el) || null;
+        const placeholder = el.getAttribute('placeholder') || null;
+        const category = getElementCategory(el);
+
+        const parentDialog = el.closest('dialog, [role="dialog"], .ui-dialog, .modal, .t-Dialog-page, .project-picker, .popup-content, .a-Dialog');
+        const inDialog = !!parentDialog;
+        let dialogTitle = null;
+        if (inDialog) {
+            const dt = parentDialog.querySelector('.ui-dialog-title, .modal-title, h1, h2, h3, h4');
+            dialogTitle = dt ? dt.innerText.trim() : (parentDialog.getAttribute('aria-label') || 'Dialog');
+        }
+
+        const { name, desc } = buildFriendlyNameAndDesc(el, tag, category, role, label, text, placeholder);
+        const { strategy, value } = determineLocators(el, tag, text, label, placeholder);
+
+        return {
+            tag_name: tag,
+            category: category,
+            role: role,
+            label: label,
+            placeholder: placeholder,
+            friendly_name: name,
+            description: desc,
+            locator_strategy: strategy,
+            locator_value: value,
+            in_dialog: inDialog,
+            dialog_title: dialogTitle,
+            page_url: window.location.href,
+            page_title: document.title,
+        };
+    }
+
+    function onMouseMove(e) {
+        if (!window.__VERIQON_PICKER_ACTIVE__) return;
+        if (window.__VERIQON_PICKER_STATUS__ === "selected") return;
+
+        const target = findInteractiveTarget(document.elementFromPoint(e.clientX, e.clientY));
+        if (!target) {
+            overlay.style.display = 'none';
+            badge.style.display = 'none';
+            return;
+        }
+
+        const r = target.getBoundingClientRect();
+        overlay.style.top = `${r.top - 2}px`;
+        overlay.style.left = `${r.left - 2}px`;
+        overlay.style.width = `${r.width + 4}px`;
+        overlay.style.height = `${r.height + 4}px`;
+        overlay.style.borderColor = '#06b6d4';
+        overlay.style.backgroundColor = 'rgba(6, 182, 212, 0.18)';
+        overlay.style.display = 'block';
+
+        const tag = target.tagName.toLowerCase();
+        const role = target.getAttribute('role') || tag;
+        const txt = (target.innerText || target.getAttribute('aria-label') || target.getAttribute('placeholder') || target.id || tag).trim().slice(0, 25);
+        badge.innerText = `🎯 [${role}] ${txt}`;
+        badge.style.background = '#0f172a';
+        badge.style.color = '#38bdf8';
+
+        let badgeTop = r.top - 28;
+        if (badgeTop < 0) badgeTop = r.bottom + 6;
+        badge.style.top = `${badgeTop}px`;
+        badge.style.left = `${Math.max(10, r.left)}px`;
+        badge.style.display = 'block';
+    }
+
+    function onClick(e) {
+        if (!window.__VERIQON_PICKER_ACTIVE__) return;
+        if (window.__VERIQON_PICKER_STATUS__ === "selected") return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        const target = findInteractiveTarget(document.elementFromPoint(e.clientX, e.clientY));
+        if (!target) return;
+
+        overlay.style.borderColor = '#10b981';
+        overlay.style.backgroundColor = 'rgba(16, 185, 129, 0.25)';
+        badge.innerText = `✓ Selected: ${(target.innerText || target.id || target.tagName).slice(0, 25)}`;
+        badge.style.background = '#064e3b';
+        badge.style.color = '#34d399';
+
+        const meta = extractMetadata(target);
+        window.__VERIQON_PICKER_RESULT__ = meta;
+        window.__VERIQON_PICKER_STATUS__ = "selected";
+    }
+
+    window.addEventListener('mousemove', onMouseMove, true);
+    window.addEventListener('click', onClick, true);
+
+    window.__VERIQON_REMOVE_PICKER__ = () => {
+        window.__VERIQON_PICKER_ACTIVE__ = false;
+        window.__VERIQON_PICKER_STATUS__ = "idle";
+        window.__VERIQON_PICKER_RESULT__ = null;
+        window.removeEventListener('mousemove', onMouseMove, true);
+        window.removeEventListener('click', onClick, true);
+        if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+        if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
+    };
+}"""
+
+
+# ---------------------------------------------------------------------------
+# Background Proactor Worker Engine (isolated from Uvicorn SelectorEventLoop)
+# ---------------------------------------------------------------------------
+
+class InspectorEngine:
+    def __init__(self):
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[Any] = None
+        self.pw: Optional[Playwright] = None
+        self.browser: Optional[Browser] = None
+        self.headed_browser: Optional[Browser] = None
+        self.sessions: Dict[str, Dict[str, Any]] = {}
+        self._ready_event = asyncio.Event()
+
+    def _start_worker(self):
+        import threading
+        if self._thread and self._thread.is_alive():
+            return
+
+        def _worker_loop():
+            # Force Windows ProactorEventLoop in this thread for full subprocess support
+            self._loop = asyncio.ProactorEventLoop()
+            asyncio.set_event_loop(self._loop)
+            self._loop.run_until_complete(self._init_playwright())
+            self._loop.run_forever()
+
+        self._thread = threading.Thread(target=_worker_loop, daemon=True, name="PlaywrightInspectorWorker")
+        self._thread.start()
+
+        # Wait up to 5s for worker loop initialization
+        for _ in range(50):
+            if self._loop and self.browser:
+                break
+            time.sleep(0.1)
+
+    async def _init_playwright(self):
+        self.pw = await async_playwright().start()
+        self.browser = await self.pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+        )
+
+    async def get_headed_browser(self) -> Browser:
+        if self.headed_browser is None or not self.headed_browser.is_connected():
+            self.headed_browser = await self.pw.chromium.launch(
+                headless=False,
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
+            )
+        return self.headed_browser
+
+    def run_task(self, coro_func, *args, **kwargs):
+        """Dispatches an async coroutine to the Proactor worker thread and waits synchronously for result."""
+        self._start_worker()
+        future = asyncio.run_coroutine_threadsafe(coro_func(*args, **kwargs), self._loop)
+        return future.result(timeout=120)
+
+    def _cleanup_expired_sessions(self):
+        """Removes sessions inactive for more than 15 minutes (900 seconds)."""
+        now = time.time()
+        expired = [pid for pid, s in list(self.sessions.items()) if now - s.get("last_active", 0) > 900]
+        for pid in expired:
+            session = self.sessions.pop(pid, None)
+            if session and session.get("page"):
+                try:
+                    asyncio.create_task(session["page"].close())
+                except Exception:
+                    pass
+
+    async def _expand_nav(self, page: Page):
+        """Fast navigation expander (< 200ms)."""
+        nav_toggle_selectors = [
+            "#t_Button_navControl",
+            "button.a-Button--navControl",
+            "button[aria-controls*='TreeNav']",
+            "button[aria-controls*='nav' i]",
+            "button[aria-label*='Main Navigation' i]",
+            "button[aria-label*='navigation' i]",
+            "button.navbar-toggler",
+            "[data-action='toggle-nav']",
+        ]
+        for sel in nav_toggle_selectors:
+            try:
+                btn = page.locator(sel).first
+                if await btn.count() > 0 and await btn.is_visible():
+                    aria_exp = await btn.get_attribute("aria-expanded")
+                    if aria_exp == "false":
+                        await btn.click()
+                        await page.wait_for_timeout(350)
+                        break
+            except Exception:
+                continue
+
+    async def _login_if_needed(self, page: Page, username: str, secret: str) -> bool:
+        """Fast login handler supporting Oracle APEX, IDCS, and standard forms."""
+        url_lower = page.url.lower()
+        if not any(x in url_lower for x in ("login", "signin", "oauth", "authorize")):
+            try:
+                await page.wait_for_url(lambda u: any(x in u.lower() for x in ("login", "signin", "oauth", "authorize")), timeout=3000)
+            except Exception:
+                pass
+        url_lower = page.url.lower()
+        if not any(x in url_lower for x in ("login", "signin", "oauth", "authorize")):
+            return False
+
+        try:
+            u_sel = "#P9999_USERNAME:visible, input[id*='signin-form-username']:visible, input[id*='username']:visible, input[name='username']:visible, input[placeholder*='user' i]:visible, input[type='text']:visible"
+            p_sel = "#P9999_PASSWORD:visible, input[id*='signin-form-password']:visible, input[id*='password']:visible, input[name='password']:visible, input[type='password']:visible, input[placeholder*='pass' i]:visible"
+            b_sel = "#B39857664851513779045, #idcs-signin-basic-signin-form-submit:visible, button.t-Button--hot:visible, button:has-text('Sign In'):visible, button:has-text('Sign in'):visible, button:has-text('Log In'):visible, button[type='submit']:visible"
+
+            u_loc = page.locator(u_sel).first
+            p_loc = page.locator(p_sel).first
+            b_loc = page.locator(b_sel).first
+
+            if await u_loc.count() == 0:
+                try:
+                    await page.wait_for_selector(u_sel, timeout=8000)
+                    u_loc = page.locator(u_sel).first
+                    p_loc = page.locator(p_sel).first
+                    b_loc = page.locator(b_sel).first
+                except Exception:
+                    pass
+
+            if await u_loc.count() > 0 and await p_loc.count() > 0:
+                await u_loc.fill(username)
+                await p_loc.fill(secret)
+                await page.wait_for_timeout(400)
+                if await b_loc.count() > 0:
+                    await b_loc.click()
+                else:
+                    await p_loc.press("Enter")
+
+                # Wait for navigation away from login and any intermediate transition screens
+                start_wait = time.time()
+                while time.time() - start_wait < 15:
+                    await page.wait_for_timeout(500)
+                    cur_url = page.url.lower()
+                    cur_title = ""
+                    try:
+                        cur_title = (await page.title()).lower()
+                    except Exception:
+                        pass
+                    
+                    on_login = any(x in cur_url for x in ("/login", "/signin", "oauth2/v1/authorize"))
+                    is_transitional = cur_title.startswith("loading ") or cur_title == ""
+                    if not on_login and not is_transitional:
+                        break
+
+                await page.wait_for_timeout(1000)
+                await self._expand_nav(page)
+                return True
+        except Exception as e:
+            logger.warning(f"Fast login failed: {e}")
+        return False
+
+    async def inspect(
+        self,
+        project_id: str,
+        project_name: str,
+        base_url: str,
+        target_url: str,
+        viewport: Dict[str, int],
+        username: str = "",
+        secret: str = "",
+        with_login: bool = False,
+        expand_navigation: bool = True,
+        force_refresh: bool = False,
+        preserve_state: bool = True,
+    ) -> Dict[str, Any]:
+        self._cleanup_expired_sessions()
+        base_url = normalize_app_url(base_url)
+        target_url = normalize_app_url(target_url)
+        session = self.sessions.get(project_id)
+
+        if force_refresh and session:
+            try:
+                await session["page"].close()
+            except Exception:
+                pass
+            self.sessions.pop(project_id, None)
+            session = None
+
+        if not session or session["page"].is_closed():
+            # Cold start: create new page context
+            page = await self.browser.new_page(
+                viewport=viewport,
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            )
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=35000)
+
+            authenticated = False
+            if with_login and username and secret:
+                authenticated = await self._login_if_needed(page, username, secret)
+
+            if expand_navigation:
+                await self._expand_nav(page)
+
+            session = {
+                "session_id": str(uuid.uuid4()),
+                "project_id": project_id,
+                "project_name": project_name,
+                "page": page,
+                "base_url": base_url,
+                "authenticated": authenticated,
+                "created_at": time.time(),
+                "last_active": time.time(),
+            }
+            self.sessions[project_id] = session
+        else:
+            page = session["page"]
+            session["last_active"] = time.time()
+
+            # Warm persistent session: navigate only if preserve_state is False or user explicitly asked for new URL
+            if not preserve_state and target_url and target_url != page.url and target_url != base_url:
+                await page.goto(target_url, wait_until="domcontentloaded", timeout=25000)
+
+            if with_login and not session.get("authenticated") and username and secret:
+                if "login" in page.url.lower():
+                    if await self._login_if_needed(page, username, secret):
+                        session["authenticated"] = True
+
+            if expand_navigation:
+                await self._expand_nav(page)
+
+        # High-speed DOM scan
+        scan_res = await page.evaluate(DOM_SCANNER_SCRIPT)
+        if isinstance(scan_res, dict):
+            raw_elements = scan_res.get("elements", [])
+            has_open_dialog = scan_res.get("has_open_dialog", False)
+            active_dialog_title = scan_res.get("active_dialog_title", "")
+        else:
+            raw_elements = scan_res or []
+            has_open_dialog = False
+            active_dialog_title = ""
+
+        # If page has not rendered interactive elements yet (common for Oracle JET / heavy SPAs)
+        if len(raw_elements) == 0:
+            try:
+                await page.wait_for_selector("input, button, a, [role='button']", state="visible", timeout=6000)
+                scan_res = await page.evaluate(DOM_SCANNER_SCRIPT)
+                if isinstance(scan_res, dict):
+                    raw_elements = scan_res.get("elements", [])
+                    has_open_dialog = scan_res.get("has_open_dialog", False)
+                    active_dialog_title = scan_res.get("active_dialog_title", "")
+                else:
+                    raw_elements = scan_res or []
+            except Exception:
+                pass
+
+        # Scan child frames (e.g. APEX modal dialog pages inside iframes)
+        if len(page.frames) > 1:
+            for frame in page.frames:
+                if frame == page.main_frame:
+                    continue
+                try:
+                    f_res = await frame.evaluate(DOM_SCANNER_SCRIPT)
+                    if isinstance(f_res, dict):
+                        f_elems = f_res.get("elements", [])
+                        if f_res.get("has_open_dialog"):
+                            has_open_dialog = True
+                    else:
+                        f_elems = f_res or []
+                    for fe in f_elems:
+                        fe["in_dialog"] = True
+                        fe["dialog_title"] = fe.get("dialog_title") or f"IFrame: {frame.name or 'modal'}"
+                        fe["frame_name"] = frame.name
+                        fe["frame_url"] = frame.url
+                        raw_elements.append(fe)
+                except Exception:
+                    pass
+
+        # High-speed compressed JPEG screenshot (~20 KB instead of 1.2 MB PNG)
+        screenshot_bytes = await page.screenshot(type="jpeg", quality=65)
+        screenshot_b64 = f"data:image/jpeg;base64,{base64.b64encode(screenshot_bytes).decode('utf-8')}"
+
+        cat_counts = {
+            "buttons": sum(1 for e in raw_elements if e["category"] == "button"),
+            "links": sum(1 for e in raw_elements if e["category"] == "link"),
+            "inputs": sum(1 for e in raw_elements if e["category"] == "input"),
+            "selects": sum(1 for e in raw_elements if e["category"] == "select"),
+            "total": len(raw_elements),
+        }
+
+        return {
+            "project_id": project_id,
+            "project_name": project_name,
+            "session_id": session.get("session_id", ""),
+            "page_url": page.url,
+            "page_title": await page.title(),
+            "screenshot": screenshot_b64,
+            "viewport": viewport,
+            "elements": raw_elements,
+            "categories_count": cat_counts,
+            "authenticated": session.get("authenticated", False),
+            "has_open_dialog": has_open_dialog,
+            "active_dialog_title": active_dialog_title,
+            "session_active": True,
+        }
+
+    async def interact(
+        self,
+        project_id: str,
+        project_name: str,
+        base_url: str,
+        action: str,
+        target: Optional[str],
+        locator_type: Optional[str],
+        value: Optional[str] = None,
+        username: str = "",
+        secret: str = "",
+    ) -> Dict[str, Any]:
+        session = self.sessions.get(project_id)
+        if not session or session["page"].is_closed():
+            # If no active session, start one first
+            return await self.inspect(
+                project_id=project_id,
+                project_name=project_name,
+                base_url=base_url,
+                target_url=base_url,
+                viewport={"width": 1440, "height": 900},
+                username=username,
+                secret=secret,
+                with_login=True,
+            )
+
+        page: Page = session["page"]
+        session["last_active"] = time.time()
+
+        if action == "login":
+            if username and secret:
+                if await self._login_if_needed(page, username, secret):
+                    session["authenticated"] = True
+
+        elif action == "click" and target:
+            clean_target = target.strip()
+            clicked = False
+
+            # Check if clearly CSS or ID locator
+            if clean_target.startswith("#") or clean_target.startswith(".") or ">>" in clean_target:
+                try:
+                    loc = page.locator(clean_target).first
+                    if await loc.count() > 0:
+                        await loc.click(timeout=3000)
+                        clicked = True
+                except Exception:
+                    pass
+
+            # Treeitem check (APEX nav)
+            if not clicked:
+                try:
+                    treeitem = page.get_by_role("treeitem", name=clean_target)
+                    if await treeitem.count() > 0 and await treeitem.first.is_visible():
+                        await treeitem.first.click(timeout=3000)
+                        clicked = True
+                except Exception:
+                    pass
+
+            # Link check
+            if not clicked:
+                try:
+                    link = page.get_by_role("link", name=clean_target)
+                    if await link.count() > 0 and await link.first.is_visible():
+                        await link.first.click(timeout=3000)
+                        clicked = True
+                except Exception:
+                    pass
+
+            # Button check
+            if not clicked:
+                try:
+                    btn = page.get_by_role("button", name=clean_target)
+                    if await btn.count() > 0 and await btn.first.is_visible():
+                        await btn.first.click(timeout=3000)
+                        clicked = True
+                except Exception:
+                    pass
+
+            # Text / option check (e.g. project options)
+            if not clicked:
+                try:
+                    text_loc = page.get_by_text(clean_target, exact=False).first
+                    if await text_loc.count() > 0 and await text_loc.is_visible():
+                        await text_loc.click(timeout=3000)
+                        clicked = True
+                except Exception:
+                    pass
+
+            # Fast in-page evaluate click fallback
+            if not clicked:
+                await page.evaluate("""(txt) => {
+                    const needle = txt.toLowerCase().trim();
+                    const candidates = Array.from(document.querySelectorAll('.project-option, .a-TreeView-label, [role="treeitem"], a, button, .t-Button'));
+                    for (const el of candidates) {
+                        const val = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        if (val === needle || val.includes(needle)) {
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }""", clean_target)
+
+            # Wait for modal dialog or DOM mutation
+            try:
+                await page.wait_for_selector('dialog, [role="dialog"], .ui-dialog, .modal, .project-picker, .project-option, .t-Dialog-page, .mon-hours', timeout=1500, state="visible")
+            except Exception:
+                pass
+            await page.wait_for_timeout(350)
+            await self._expand_nav(page)
+
+        elif action == "fill" and target:
+            clean_target = target.strip()
+            val = value or ""
+            filled = False
+            for loc_candidate in [page.locator(f"#{clean_target}"), page.locator(clean_target), page.get_by_label(clean_target), page.get_by_placeholder(clean_target)]:
+                try:
+                    if await loc_candidate.count() > 0 and await loc_candidate.first.is_visible():
+                        await loc_candidate.first.fill(val)
+                        filled = True
+                        break
+                except Exception:
+                    pass
+            await page.wait_for_timeout(200)
+
+        elif action == "navigate" and target:
+            dest = target.strip()
+            if dest.startswith("/"):
+                dest = f"{base_url}{dest}"
+            await page.goto(dest, wait_until="domcontentloaded", timeout=25000)
+            await page.wait_for_timeout(300)
+            await self._expand_nav(page)
+
+        elif action == "expand_nav":
+            await self._expand_nav(page)
+
+        # Return refreshed scan
+        scan_res = await page.evaluate(DOM_SCANNER_SCRIPT)
+        if isinstance(scan_res, dict):
+            raw_elements = scan_res.get("elements", [])
+            has_open_dialog = scan_res.get("has_open_dialog", False)
+            active_dialog_title = scan_res.get("active_dialog_title", "")
+        else:
+            raw_elements = scan_res or []
+            has_open_dialog = False
+            active_dialog_title = ""
+
+        # Scan child frames if any
+        if len(page.frames) > 1:
+            for frame in page.frames:
+                if frame == page.main_frame:
+                    continue
+                try:
+                    f_res = await frame.evaluate(DOM_SCANNER_SCRIPT)
+                    f_elems = f_res.get("elements", []) if isinstance(f_res, dict) else (f_res or [])
+                    if isinstance(f_res, dict) and f_res.get("has_open_dialog"):
+                        has_open_dialog = True
+                    for fe in f_elems:
+                        fe["in_dialog"] = True
+                        fe["dialog_title"] = fe.get("dialog_title") or f"IFrame: {frame.name or 'modal'}"
+                        raw_elements.append(fe)
+                except Exception:
+                    pass
+
+        screenshot_bytes = await page.screenshot(type="jpeg", quality=65)
+        screenshot_b64 = f"data:image/jpeg;base64,{base64.b64encode(screenshot_bytes).decode('utf-8')}"
+
+        cat_counts = {
+            "buttons": sum(1 for e in raw_elements if e["category"] == "button"),
+            "links": sum(1 for e in raw_elements if e["category"] == "link"),
+            "inputs": sum(1 for e in raw_elements if e["category"] == "input"),
+            "selects": sum(1 for e in raw_elements if e["category"] == "select"),
+            "total": len(raw_elements),
+        }
+
+        return {
+            "project_id": project_id,
+            "project_name": project_name,
+            "session_id": session.get("session_id", ""),
+            "page_url": page.url,
+            "page_title": await page.title(),
+            "screenshot": screenshot_b64,
+            "viewport": {"width": 1440, "height": 900},
+            "elements": raw_elements,
+            "categories_count": cat_counts,
+            "authenticated": session.get("authenticated", False),
+            "has_open_dialog": has_open_dialog,
+            "active_dialog_title": active_dialog_title,
+            "session_active": True,
+        }
+
+    async def replay_steps(
+        self,
+        project_id: str,
+        project_name: str,
+        base_url: str,
+        steps: List[Dict[str, Any]],
+        username: str = "",
+        secret: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Replays preceding workflow steps in the persistent browser inspection session
+        to bring the application to the exact state (e.g. open modal/dialog or dynamic row)
+        so the user can inspect and pick elements that only appear after prior actions.
+        """
+        session = self.sessions.get(project_id)
+        if not session or session["page"].is_closed():
+            # Start fresh session
+            await self.inspect(
+                project_id=project_id,
+                project_name=project_name,
+                base_url=base_url,
+                target_url=base_url,
+                viewport={"width": 1440, "height": 900},
+                username=username,
+                secret=secret,
+                with_login=True,
+            )
+            session = self.sessions.get(project_id)
+
+        page: Page = session["page"]
+        session["last_active"] = time.time()
+
+        for step in steps:
+            action_type = step.get("action_type") or step.get("type") or ""
+            target = step.get("locator_value") or step.get("target") or step.get("url") or ""
+            val = step.get("value") or ""
+
+            # Check if login is needed before executing next step
+            if ("login" in page.url.lower() or "signin" in page.url.lower()) and username and secret:
+                await self._login_if_needed(page, username, secret)
+
+            try:
+                if action_type == "open_app":
+                    await page.goto(base_url, wait_until="domcontentloaded", timeout=20000)
+                    if ("login" in page.url.lower() or "signin" in page.url.lower()) and username and secret:
+                        await self._login_if_needed(page, username, secret)
+                    await self._expand_nav(page)
+
+                elif action_type == "login":
+                    await self._login_if_needed(page, username, secret)
+
+                elif action_type == "navigate":
+                    if target.startswith("/") or target.startswith("http"):
+                        dest = target if target.startswith("http") else f"{base_url}{target}"
+                        await page.goto(dest, wait_until="domcontentloaded", timeout=20000)
+                    else:
+                        # Click menu or link
+                        for finder in [
+                            lambda: page.get_by_role("treeitem", name=target).first,
+                            lambda: page.get_by_role("link", name=target).first,
+                            lambda: page.get_by_text(target).first,
+                        ]:
+                            try:
+                                loc = finder()
+                                if await loc.count() > 0 and await loc.is_visible():
+                                    await loc.click(timeout=3000)
+                                    break
+                            except Exception:
+                                pass
+                    await page.wait_for_timeout(400)
+                    await self._expand_nav(page)
+
+                elif action_type == "click_element":
+                    clicked = False
+                    for locator_candidate in [
+                        page.locator(f"#{target}") if not target.startswith(("#", ".", "[")) else page.locator(target),
+                        page.get_by_role("button", name=target),
+                        page.get_by_text(target),
+                    ]:
+                        try:
+                            if await locator_candidate.count() > 0 and await locator_candidate.first.is_visible():
+                                await locator_candidate.first.click(timeout=3000)
+                                clicked = True
+                                break
+                        except Exception:
+                            pass
+                    # Wait for modal dialog or DOM update
+                    try:
+                        await page.wait_for_selector('dialog, [role="dialog"], .ui-dialog, .modal, .project-picker, .project-option, .mon-hours', timeout=1500, state="visible")
+                    except Exception:
+                        pass
+                    await page.wait_for_timeout(300)
+
+                elif action_type == "fill_input":
+                    for locator_candidate in [
+                        page.locator(f"#{target}") if not target.startswith(("#", ".", "[")) else page.locator(target),
+                        page.get_by_label(target),
+                        page.get_by_placeholder(target),
+                    ]:
+                        try:
+                            if await locator_candidate.count() > 0 and await locator_candidate.first.is_visible():
+                                await locator_candidate.first.fill(val)
+                                break
+                        except Exception:
+                            pass
+                    await page.wait_for_timeout(150)
+
+                elif action_type == "select_option":
+                    for locator_candidate in [
+                        page.locator(f"#{target}") if not target.startswith(("#", ".", "[")) else page.locator(target),
+                        page.get_by_label(target),
+                    ]:
+                        try:
+                            if await locator_candidate.count() > 0 and await locator_candidate.first.is_visible():
+                                await locator_candidate.first.select_option(label=val)
+                                break
+                        except Exception:
+                            pass
+                    await page.wait_for_timeout(150)
+
+                elif action_type == "wait_time":
+                    dur = int(step.get("duration", 1000))
+                    await page.wait_for_timeout(min(dur, 5000))
+            except Exception as step_err:
+                logger.warning(f"Step replay error on {action_type}: {step_err}")
+
+        # Scan resulting state
+        scan_res = await page.evaluate(DOM_SCANNER_SCRIPT)
+        if isinstance(scan_res, dict):
+            raw_elements = scan_res.get("elements", [])
+            has_open_dialog = scan_res.get("has_open_dialog", False)
+            active_dialog_title = scan_res.get("active_dialog_title", "")
+        else:
+            raw_elements = scan_res or []
+            has_open_dialog = False
+            active_dialog_title = ""
+
+        # Scan child frames if any
+        if len(page.frames) > 1:
+            for frame in page.frames:
+                if frame == page.main_frame:
+                    continue
+                try:
+                    f_res = await frame.evaluate(DOM_SCANNER_SCRIPT)
+                    f_elems = f_res.get("elements", []) if isinstance(f_res, dict) else (f_res or [])
+                    if isinstance(f_res, dict) and f_res.get("has_open_dialog"):
+                        has_open_dialog = True
+                    for fe in f_elems:
+                        fe["in_dialog"] = True
+                        fe["dialog_title"] = fe.get("dialog_title") or f"IFrame: {frame.name or 'modal'}"
+                        raw_elements.append(fe)
+                except Exception:
+                    pass
+
+        screenshot_bytes = await page.screenshot(type="jpeg", quality=65)
+        screenshot_b64 = f"data:image/jpeg;base64,{base64.b64encode(screenshot_bytes).decode('utf-8')}"
+
+        cat_counts = {
+            "buttons": sum(1 for e in raw_elements if e["category"] == "button"),
+            "links": sum(1 for e in raw_elements if e["category"] == "link"),
+            "inputs": sum(1 for e in raw_elements if e["category"] == "input"),
+            "selects": sum(1 for e in raw_elements if e["category"] == "select"),
+            "total": len(raw_elements),
+        }
+
+        return {
+            "project_id": project_id,
+            "project_name": project_name,
+            "session_id": session.get("session_id", ""),
+            "page_url": page.url,
+            "page_title": await page.title(),
+            "screenshot": screenshot_b64,
+            "viewport": {"width": 1440, "height": 900},
+            "elements": raw_elements,
+            "categories_count": cat_counts,
+            "authenticated": session.get("authenticated", False),
+            "has_open_dialog": has_open_dialog,
+            "active_dialog_title": active_dialog_title,
+            "session_active": True,
+        }
+
+    async def get_status(self, project_id: str) -> Dict[str, Any]:
+        return await self.get_browser_status(project_id)
+
+    async def start_browser(
+        self,
+        project_id: str,
+        project_name: str,
+        base_url: str,
+        username: str = "",
+        secret: str = "",
+        with_login: bool = True,
+        visible: bool = True,
+    ) -> Dict[str, Any]:
+        self._cleanup_expired_sessions()
+        base_url = normalize_app_url(base_url)
+        session = self.sessions.get(project_id)
+
+        # If session already open with same visibility mode, bring to front
+        if session and not session["page"].is_closed():
+            if session.get("visible", False) != visible:
+                try:
+                    await session["page"].close()
+                except Exception:
+                    pass
+                self.sessions.pop(project_id, None)
+                session = None
+            else:
+                try:
+                    await session["page"].bring_to_front()
+                except Exception:
+                    pass
+                session["last_active"] = time.time()
+                return await self.get_browser_status(project_id)
+
+        # Launch fresh context & page
+        if visible:
+            browser = await self.get_headed_browser()
+            context = await browser.new_context(
+                viewport={"width": 1440, "height": 900},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            )
+            page = await context.new_page()
+        else:
+            page = await self.browser.new_page(
+                viewport={"width": 1440, "height": 900},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            )
+
+        # Register session immediately so browser is tracked and observable
+        session = {
+            "session_id": str(uuid.uuid4()),
+            "project_id": project_id,
+            "project_name": project_name,
+            "page": page,
+            "base_url": base_url,
+            "authenticated": False,
+            "visible": visible,
+            "created_at": time.time(),
+            "last_active": time.time(),
+            "picker_active": False,
+            "selected_element": None,
+        }
+        self.sessions[project_id] = session
+
+        authenticated = False
+        try:
+            await page.goto(base_url, wait_until="domcontentloaded", timeout=35000)
+            if with_login and username and secret:
+                authenticated = await self._login_if_needed(page, username, secret)
+            await self._expand_nav(page)
+        except Exception as e:
+            logger.warning(f"Error during browser navigation: {e}")
+
+        session["authenticated"] = authenticated
+        session["last_active"] = time.time()
+        return await self.get_browser_status(project_id)
+
+    async def get_browser_status(self, project_id: str) -> Dict[str, Any]:
+        session = self.sessions.get(project_id)
+        if not session or session["page"].is_closed():
+            return {
+                "active": False,
+                "visible": False,
+                "project_id": project_id,
+                "session_id": "",
+                "current_url": "",
+                "clean_url": "",
+                "display_url": "",
+                "page_title": "",
+                "page_name": "",
+                "picker_active": False,
+                "authenticated": False,
+                "last_active_seconds_ago": 0,
+            }
+        page = session["page"]
+        raw_url = page.url
+        try:
+            page_title = await page.title()
+        except Exception:
+            page_title = ""
+        clean_url, page_name = clean_page_identity(raw_url, page_title)
+        display_url = redact_sensitive_url(raw_url)
+        return {
+            "active": True,
+            "visible": session.get("visible", False),
+            "project_id": project_id,
+            "session_id": session.get("session_id", ""),
+            "current_url": clean_url,
+            "clean_url": clean_url,
+            "display_url": display_url,
+            "page_title": page_title,
+            "page_name": page_name,
+            "picker_active": session.get("picker_active", False),
+            "authenticated": session.get("authenticated", False),
+            "last_active_seconds_ago": round(time.time() - session.get("last_active", time.time()), 1),
+        }
+
+    async def start_picker(self, project_id: str) -> Dict[str, Any]:
+        session = self.sessions.get(project_id)
+        if not session or session["page"].is_closed():
+            raise RuntimeError("No active browser session found for this application. Please open the browser first.")
+        page: Page = session["page"]
+        session["last_active"] = time.time()
+        session["picker_active"] = True
+        session["selected_element"] = None
+        await page.evaluate(PICKER_INJECTION_SCRIPT)
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+        return {"status": "picking", "active": True}
+
+    async def get_picker_status(self, project_id: str) -> Dict[str, Any]:
+        session = self.sessions.get(project_id)
+        if not session or session["page"].is_closed():
+            return {"status": "idle", "active": False, "element": None}
+        page: Page = session["page"]
+        session["last_active"] = time.time()
+        try:
+            res = await page.evaluate("""() => {
+                return {
+                    status: window.__VERIQON_PICKER_STATUS__ || 'idle',
+                    active: !!window.__VERIQON_PICKER_ACTIVE__,
+                    element: window.__VERIQON_PICKER_RESULT__ || null,
+                };
+            }""")
+            return res
+        except Exception as e:
+            return {"status": "idle", "active": False, "element": None, "error": str(e)}
+
+    async def cancel_picker(self, project_id: str) -> Dict[str, Any]:
+        session = self.sessions.get(project_id)
+        if session and not session["page"].is_closed():
+            try:
+                await session["page"].evaluate("() => { if (window.__VERIQON_REMOVE_PICKER__) window.__VERIQON_REMOVE_PICKER__(); }")
+            except Exception:
+                pass
+            session["picker_active"] = False
+            session["selected_element"] = None
+        return {"status": "idle", "active": False}
+
+    async def capture_current_page(
+        self,
+        project_id: str,
+        project_name: str,
+        base_url: str,
+        username: str = "",
+        secret: str = "",
+    ) -> Dict[str, Any]:
+        session = self.sessions.get(project_id)
+        if not session or session["page"].is_closed():
+            return await self.inspect(
+                project_id=project_id,
+                project_name=project_name,
+                base_url=base_url,
+                target_url=base_url,
+                viewport={"width": 1440, "height": 900},
+                username=username,
+                secret=secret,
+                with_login=True,
+                force_refresh=False,
+                preserve_state=True,
+            )
+
+        page: Page = session["page"]
+        session["last_active"] = time.time()
+
+        scan_res = await page.evaluate(DOM_SCANNER_SCRIPT)
+        if isinstance(scan_res, dict):
+            raw_elements = scan_res.get("elements", [])
+            has_open_dialog = scan_res.get("has_open_dialog", False)
+            active_dialog_title = scan_res.get("active_dialog_title", "")
+        else:
+            raw_elements = scan_res or []
+            has_open_dialog = False
+            active_dialog_title = ""
+
+        # Scan child frames (e.g. APEX modal dialog pages inside iframes)
+        if len(page.frames) > 1:
+            for frame in page.frames:
+                if frame == page.main_frame:
+                    continue
+                try:
+                    f_res = await frame.evaluate(DOM_SCANNER_SCRIPT)
+                    if isinstance(f_res, dict):
+                        f_elems = f_res.get("elements", [])
+                        if f_res.get("has_open_dialog"):
+                            has_open_dialog = True
+                    else:
+                        f_elems = f_res or []
+                    for fe in f_elems:
+                        fe["in_dialog"] = True
+                        fe["dialog_title"] = fe.get("dialog_title") or f"IFrame: {frame.name or 'modal'}"
+                        fe["frame_name"] = frame.name
+                        fe["frame_url"] = frame.url
+                        raw_elements.append(fe)
+                except Exception:
+                    pass
+
+        return {
+            "project_id": project_id,
+            "project_name": project_name,
+            "session_id": session.get("session_id", ""),
+            "page_url": page.url,
+            "page_title": await page.title(),
+            "elements": raw_elements,
+            "has_open_dialog": has_open_dialog,
+            "active_dialog_title": active_dialog_title,
+            "session_active": True,
+        }
+
+    async def close_session(self, project_id: str):
+        session = self.sessions.pop(project_id, None)
+        if session:
+            try:
+                await session["page"].close()
+            except Exception:
+                pass
+
+
+# Global singleton engine
+_inspector_engine = InspectorEngine()
+
+
+# ---------------------------------------------------------------------------
+# API Schemas
+# ---------------------------------------------------------------------------
+
+class ElementRect(BaseModel):
+    x: int
+    y: int
+    width: int
+    height: int
+    top: int
+    left: int
+    right: int
+    bottom: int
 
 
 class InspectElementItem(BaseModel):
     id: str
-    category: str
-    tag: str
-    role: str
-    type: str
-    text: str
-    label: str
-    placeholder: str
-    element_id: str
-    name_attr: str
     friendly_name: str
+    category: str
+    tag_name: str
+    role: Optional[str] = None
+    text: str = ""
+    label: str = ""
+    placeholder: str = ""
+    element_id: str = ""
+    name_attr: str = ""
+    type_attr: str = ""
     locator_strategy: str
     locator_value: str
-    is_ambiguous: bool = False
-    options: List[Dict[str, str]] = []
-    rect: Dict[str, int]
+    suggested_action: str
+    in_dialog: bool = False
+    dialog_title: str = ""
+    frame_name: Optional[str] = None
+    frame_url: Optional[str] = None
+    rect: ElementRect
+
+
+class InspectRequest(BaseModel):
+    path: Optional[str] = ""
+    with_login: bool = True
+    expand_navigation: bool = True
+    force_refresh: bool = False
+    preserve_state: bool = True
+    viewport_width: int = 1440
+    viewport_height: int = 900
 
 
 class InspectResponse(BaseModel):
     project_id: str
     project_name: str
+    session_id: str = ""
     page_url: str
     page_title: str
-    screenshot: str  # Base64 data URI
+    screenshot: str
     viewport: Dict[str, int]
     elements: List[InspectElementItem]
     categories_count: Dict[str, int]
     authenticated: bool = False
+    has_open_dialog: bool = False
+    active_dialog_title: str = ""
+    session_active: bool = True
 
 
 class InteractRequest(BaseModel):
-    action: str  # "click", "navigate", "login", "expand_nav"
+    action: str
     target: Optional[str] = None
     locator_type: Optional[str] = "smart"
     value: Optional[str] = None
 
 
-def _get_or_create_session(project_id: str, base_url: str, viewport: Dict[str, int]) -> Dict[str, Any]:
-    """Retrieves an existing Playwright inspector session or starts a fresh one."""
-    current_time = time.time()
-
-    # Clean expired sessions (> 10 minutes inactive)
-    for p_id in list(active_inspector_sessions.keys()):
-        sess = active_inspector_sessions[p_id]
-        if current_time - sess.get("last_active", 0) > 600:
-            try:
-                sess["browser"].close()
-                sess["pw"].stop()
-            except Exception:
-                pass
-            active_inspector_sessions.pop(p_id, None)
-
-    if project_id in active_inspector_sessions:
-        session = active_inspector_sessions[project_id]
-        session["last_active"] = current_time
-        return session
-
-    pw = sync_playwright().start()
-    browser = pw.chromium.launch(headless=True)
-    page = browser.new_page(
-        viewport=viewport,
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-    )
-
-    session = {
-        "pw": pw,
-        "browser": browser,
-        "page": page,
-        "base_url": base_url,
-        "authenticated": False,
-        "last_active": current_time,
-    }
-    active_inspector_sessions[project_id] = session
-    return session
+class ReplayStepsRequest(BaseModel):
+    steps: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-def _close_session(project_id: str):
-    """Closes an inspector session cleanly."""
-    session = active_inspector_sessions.pop(project_id, None)
-    if session:
-        try:
-            session["browser"].close()
-            session["pw"].stop()
-        except Exception:
-            pass
-
+# ---------------------------------------------------------------------------
+# API Routes
+# ---------------------------------------------------------------------------
 
 @router.post("/{project_id}/inspect", response_model=InspectResponse)
 def inspect_application_page(
@@ -299,130 +1827,60 @@ def inspect_application_page(
     db: Session = Depends(get_db),
 ):
     """
-    Renders the target application page, extracts all visible interactive elements
-    with clean accessible locators, and returns a visual snapshot for the frontend element picker.
+    Renders the target application page, extracts all visible interactive elements,
+    and returns a fast visual snapshot for the frontend element picker while reusing
+    the persistent browser session.
     """
     project = db_service.resolve_project(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Application '{project_id}' not found.")
 
-    base_url = (project.get("base_url") or "").rstrip("/")
+    base_url = normalize_app_url((project.get("base_url") or "").rstrip("/"))
     if not base_url:
         raise HTTPException(status_code=400, detail="Application does not have a configured base URL.")
 
     raw_path = (payload.path or "").strip()
     if raw_path.startswith(("http://", "https://")):
-        target_url = raw_path
+        target_url = normalize_app_url(raw_path)
     elif raw_path.startswith("/"):
-        target_url = f"{base_url}{raw_path}"
+        target_url = normalize_app_url(f"{base_url}{raw_path}")
     elif raw_path:
-        target_url = f"{base_url}/{raw_path}"
+        target_url = normalize_app_url(f"{base_url}/{raw_path}")
     else:
         target_url = base_url
 
-    if payload.force_refresh:
-        _close_session(project_id)
+    username = ""
+    secret = ""
+    try:
+        creds_list = credentials_service.list_credentials(db, project["id"])
+        if creds_list:
+            dec = credentials_service.get_decrypted_credential(db, uuid.UUID(creds_list[0]["id"]))
+            username = dec.get("username", "")
+            secret = dec.get("secret", "")
+    except Exception as e:
+        logger.warning(f"Could not retrieve credentials: {e}")
 
     viewport = {"width": payload.viewport_width, "height": payload.viewport_height}
-    session = _get_or_create_session(project_id, base_url, viewport)
-    page: Page = session["page"]
 
     try:
-        # Check if we need to navigate or perform initial load
-        if payload.force_refresh or page.url == "about:blank" or (target_url != page.url and not payload.with_login):
-            page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
-            try:
-                page.wait_for_load_state("load", timeout=8000)
-            except Exception:
-                pass
-            page.wait_for_timeout(1500)
-
-        # Handle automatic login if requested and not yet authenticated
-        if payload.with_login and not session.get("authenticated"):
-            # Ensure at base URL / login URL first
-            if "login" not in page.url.lower():
-                page.goto(base_url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(1000)
-
-            creds_list = credentials_service.list_credentials(db, project["id"])
-            if creds_list:
-                dec = credentials_service.get_decrypted_credential(db, uuid.UUID(creds_list[0]["id"]))
-                user = dec.get("username", "")
-                secret = dec.get("secret", "")
-                if user and secret:
-                    try:
-                        u_loc = (
-                            page.get_by_role("textbox", name="Username")
-                            or page.get_by_label("Username")
-                            or page.locator("#P9999_USERNAME")
-                            or page.locator("input[name='username']")
-                        )
-                        p_loc = (
-                            page.get_by_role("textbox", name="Password")
-                            or page.get_by_label("Password")
-                            or page.locator("#P9999_PASSWORD")
-                            or page.locator("input[type='password']")
-                        )
-                        b_loc = (
-                            page.get_by_role("button", name="Sign In")
-                            or page.get_by_role("button", name="Log In")
-                            or page.locator("button[type='submit']")
-                        )
-
-                        if u_loc.count() > 0 and p_loc.count() > 0:
-                            u_loc.first.fill(user)
-                            p_loc.first.fill(secret)
-                            b_loc.first.click()
-                            try:
-                                page.wait_for_load_state("load", timeout=12000)
-                            except Exception:
-                                pass
-                            page.wait_for_timeout(2000)
-                            session["authenticated"] = True
-                    except Exception as log_err:
-                        logger.warning(f"Auto-login failed: {log_err}")
-
-        # Expand navigation if requested
-        if payload.expand_navigation:
-            ensure_navigation_expanded(page)
-
-        # Run client-side DOM scanner
-        raw_elements = page.evaluate(DOM_SCANNER_SCRIPT)
-
-        # Capture screenshot
-        screenshot_bytes = page.screenshot(type="png", full_page=False)
-        screenshot_b64 = f"data:image/png;base64,{base64.b64encode(screenshot_bytes).decode('utf-8')}"
-
-        page_url = page.url
-        page_title = page.title()
-
-        cat_counts: Dict[str, int] = {
-            "buttons": sum(1 for e in raw_elements if e["category"] == "button"),
-            "links": sum(1 for e in raw_elements if e["category"] == "link"),
-            "inputs": sum(1 for e in raw_elements if e["category"] == "input"),
-            "selects": sum(1 for e in raw_elements if e["category"] == "select"),
-            "total": len(raw_elements),
-        }
-
-        return InspectResponse(
+        data = _inspector_engine.run_task(
+            _inspector_engine.inspect,
             project_id=project_id,
             project_name=project.get("name", project_id),
-            page_url=page_url,
-            page_title=page_title,
-            screenshot=screenshot_b64,
+            base_url=base_url,
+            target_url=target_url,
             viewport=viewport,
-            elements=raw_elements,
-            categories_count=cat_counts,
-            authenticated=session.get("authenticated", False),
+            username=username,
+            secret=secret,
+            with_login=payload.with_login,
+            expand_navigation=payload.expand_navigation,
+            force_refresh=payload.force_refresh,
+            preserve_state=payload.preserve_state,
         )
-
+        return InspectResponse(**data)
     except Exception as exc:
-        _close_session(project_id)
-        logger.error(f"Failed to inspect application '{project_id}': {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unable to inspect application page: {str(exc)}",
-        )
+        logger.error(f"Error in inspector for '{project_id}': {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Unable to inspect application page: {str(exc)}")
 
 
 @router.post("/{project_id}/interact", response_model=InspectResponse)
@@ -432,112 +1890,526 @@ def interact_with_inspector(
     db: Session = Depends(get_db),
 ):
     """
-    Executes an action (e.g. click a menu item or login) within the active inspector session,
-    allowing the user to advance pages and pick elements from subsequent views.
+    Executes a high-speed action within the active inspector session.
     """
     project = db_service.resolve_project(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail=f"Application '{project_id}' not found.")
 
     base_url = (project.get("base_url") or "").rstrip("/")
-    session = _get_or_create_session(project_id, base_url, {"width": 1440, "height": 900})
-    page: Page = session["page"]
+
+    username = ""
+    secret = ""
+    try:
+        creds_list = credentials_service.list_credentials(db, project["id"])
+        if creds_list:
+            dec = credentials_service.get_decrypted_credential(db, uuid.UUID(creds_list[0]["id"]))
+            username = dec.get("username", "")
+            secret = dec.get("secret", "")
+    except Exception:
+        pass
 
     try:
-        if payload.action == "login":
-            creds_list = credentials_service.list_credentials(db, project["id"])
-            if not creds_list:
-                raise HTTPException(status_code=400, detail="No vault credentials configured for this application.")
-            dec = credentials_service.get_decrypted_credential(db, uuid.UUID(creds_list[0]["id"]))
-            user = dec.get("username", "")
-            secret = dec.get("secret", "")
-
-            u_loc = (
-                page.get_by_role("textbox", name="Username")
-                or page.get_by_label("Username")
-                or page.locator("#P9999_USERNAME")
-                or page.locator("input[name='username']")
-            )
-            p_loc = (
-                page.get_by_role("textbox", name="Password")
-                or page.get_by_label("Password")
-                or page.locator("#P9999_PASSWORD")
-                or page.locator("input[type='password']")
-            )
-            b_loc = (
-                page.get_by_role("button", name="Sign In")
-                or page.get_by_role("button", name="Log In")
-                or page.locator("button[type='submit']")
-            )
-
-            if u_loc.count() > 0 and p_loc.count() > 0:
-                u_loc.first.fill(user)
-                p_loc.first.fill(secret)
-                b_loc.first.click()
-                try:
-                    page.wait_for_load_state("load", timeout=12000)
-                except Exception:
-                    pass
-                page.wait_for_timeout(2000)
-                ensure_navigation_expanded(page)
-                session["authenticated"] = True
-
-        elif payload.action == "click" and payload.target:
-            robust_click(page, payload.locator_type, payload.target)
-            try:
-                page.wait_for_load_state("domcontentloaded", timeout=8000)
-            except Exception:
-                pass
-            page.wait_for_timeout(1500)
-            ensure_navigation_expanded(page)
-
-        elif payload.action == "navigate" and payload.target:
-            dest = payload.target
-            if dest.startswith("/"):
-                dest = f"{base_url}{dest}"
-            page.goto(dest, wait_until="domcontentloaded", timeout=30000)
-            try:
-                page.wait_for_load_state("load", timeout=8000)
-            except Exception:
-                pass
-            page.wait_for_timeout(1000)
-            ensure_navigation_expanded(page)
-
-        elif payload.action == "expand_nav":
-            ensure_navigation_expanded(page)
-            page.wait_for_timeout(800)
-
-        raw_elements = page.evaluate(DOM_SCANNER_SCRIPT)
-        screenshot_bytes = page.screenshot(type="png", full_page=False)
-        screenshot_b64 = f"data:image/png;base64,{base64.b64encode(screenshot_bytes).decode('utf-8')}"
-
-        cat_counts: Dict[str, int] = {
-            "buttons": sum(1 for e in raw_elements if e["category"] == "button"),
-            "links": sum(1 for e in raw_elements if e["category"] == "link"),
-            "inputs": sum(1 for e in raw_elements if e["category"] == "input"),
-            "selects": sum(1 for e in raw_elements if e["category"] == "select"),
-            "total": len(raw_elements),
-        }
-
-        return InspectResponse(
+        data = _inspector_engine.run_task(
+            _inspector_engine.interact,
             project_id=project_id,
             project_name=project.get("name", project_id),
-            page_url=page.url,
-            page_title=page.title(),
-            screenshot=screenshot_b64,
-            viewport={"width": 1440, "height": 900},
-            elements=raw_elements,
-            categories_count=cat_counts,
-            authenticated=session.get("authenticated", False),
+            base_url=base_url,
+            action=payload.action,
+            target=payload.target,
+            locator_type=payload.locator_type,
+            value=payload.value,
+            username=username,
+            secret=secret,
         )
-
+        return InspectResponse(**data)
     except Exception as exc:
-        logger.error(f"Interaction error in inspector for '{project_id}': {exc}", exc_info=True)
+        logger.error(f"Interaction error in inspector: {exc}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Interaction error: {str(exc)}")
+
+
+@router.post("/{project_id}/replay-steps", response_model=InspectResponse)
+def replay_workflow_steps(
+    project_id: str,
+    payload: ReplayStepsRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Replays the specified preceding steps in the persistent inspector browser session,
+    enabling element selection inside dynamically opened dialogs, modals, and tables.
+    """
+    project = db_service.resolve_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Application '{project_id}' not found.")
+
+    base_url = (project.get("base_url") or "").rstrip("/")
+
+    username = ""
+    secret = ""
+    try:
+        creds_list = credentials_service.list_credentials(db, project["id"])
+        if creds_list:
+            dec = credentials_service.get_decrypted_credential(db, uuid.UUID(creds_list[0]["id"]))
+            username = dec.get("username", "")
+            secret = dec.get("secret", "")
+    except Exception:
+        pass
+
+    try:
+        data = _inspector_engine.run_task(
+            _inspector_engine.replay_steps,
+            project_id=project_id,
+            project_name=project.get("name", project_id),
+            base_url=base_url,
+            steps=payload.steps,
+            username=username,
+            secret=secret,
+        )
+        return InspectResponse(**data)
+    except Exception as exc:
+        logger.error(f"Error replaying steps in inspector: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Replay error: {str(exc)}")
+
+
+@router.get("/{project_id}/status")
+def get_inspector_session_status(project_id: str):
+    """Returns the current status of the persistent inspector browser session."""
+    try:
+        return _inspector_engine.run_task(_inspector_engine.get_status, project_id)
+    except Exception as exc:
+        return {"active": False, "project_id": project_id, "error": str(exc)}
 
 
 @router.post("/{project_id}/close")
 def close_inspector_session(project_id: str):
     """Closes an active inspection session."""
-    _close_session(project_id)
+    try:
+        _inspector_engine.run_task(_inspector_engine.close_session, project_id)
+    except Exception:
+        pass
     return {"status": "closed", "project_id": project_id}
+
+
+# ---------------------------------------------------------------------------
+# Element Discovery: scan + persist to app_elements
+# ---------------------------------------------------------------------------
+
+class StartBrowserRequest(BaseModel):
+    visible: bool = True
+    with_login: bool = True
+
+
+class SaveSelectedElementRequest(BaseModel):
+    friendly_name: str
+    description: Optional[str] = ""
+    category: str = "other"
+    tag_name: str = "div"
+    role: Optional[str] = None
+    label: Optional[str] = None
+    placeholder: Optional[str] = None
+    locator_strategy: str
+    locator_value: str
+    in_dialog: bool = False
+    dialog_title: Optional[str] = None
+    page_url: str
+    page_name: Optional[str] = None
+
+
+class DiscoverRequest(BaseModel):
+    force_refresh: bool = False
+    viewport_width: int = 1440
+    viewport_height: int = 900
+
+
+@router.post("/{project_id}/start-browser")
+def start_browser_session(
+    project_id: str,
+    payload: StartBrowserRequest = StartBrowserRequest(),
+    db: Session = Depends(get_db),
+):
+    """
+    Launches a real interactive browser window (or headless session) for the application.
+    Reuses saved credentials via credentials_service without exposing them.
+    """
+    project = db_service.resolve_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Application '{project_id}' not found.")
+
+    base_url = normalize_app_url((project.get("base_url") or "").rstrip("/"))
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Application does not have a configured base URL.")
+
+    username = ""
+    secret = ""
+    try:
+        creds_list = credentials_service.list_credentials(db, project["id"])
+        if creds_list:
+            dec = credentials_service.get_decrypted_credential(db, uuid.UUID(creds_list[0]["id"]))
+            username = dec.get("username", "")
+            secret = dec.get("secret", "")
+    except Exception as exc:
+        logger.warning(f"Could not retrieve credentials for start-browser: {exc}")
+
+    try:
+        return _inspector_engine.run_task(
+            _inspector_engine.start_browser,
+            project_id=project_id,
+            project_name=project.get("name", project_id),
+            base_url=base_url,
+            username=username,
+            secret=secret,
+            with_login=payload.with_login,
+            visible=payload.visible,
+        )
+    except Exception as exc:
+        logger.error(f"Error starting browser for '{project_id}': {exc}", exc_info=True)
+        err_msg = str(exc) or type(exc).__name__
+        raise HTTPException(status_code=500, detail=f"Unable to start browser: {err_msg}")
+
+
+@router.get("/{project_id}/browser-status")
+def get_browser_session_status(project_id: str):
+    """
+    Returns live observable status of the browser session: current title, redacted URL,
+    clean URL, picker state, and connectivity.
+    """
+    try:
+        return _inspector_engine.run_task(_inspector_engine.get_browser_status, project_id)
+    except Exception as exc:
+        return {
+            "active": False,
+            "visible": False,
+            "project_id": project_id,
+            "current_url": "",
+            "clean_url": "",
+            "display_url": "",
+            "page_title": "",
+            "page_name": "",
+            "picker_active": False,
+            "authenticated": False,
+            "error": str(exc),
+        }
+
+
+@router.post("/{project_id}/start-picker")
+def start_element_picker(project_id: str):
+    """
+    Enters element selection mode in the active browser. Injects hover highlight
+    and safe click interception overlay so target application actions are not triggered.
+    """
+    try:
+        return _inspector_engine.run_task(_inspector_engine.start_picker, project_id)
+    except Exception as exc:
+        logger.error(f"Failed to start picker: {exc}")
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/{project_id}/picker-status")
+def get_element_picker_status(project_id: str):
+    """
+    Polls the element picker state. Returns 'picking' while waiting, or 'selected'
+    with candidate metadata when an element is clicked.
+    """
+    try:
+        return _inspector_engine.run_task(_inspector_engine.get_picker_status, project_id)
+    except Exception as exc:
+        return {"status": "idle", "active": False, "element": None, "error": str(exc)}
+
+
+@router.post("/{project_id}/cancel-picker")
+def cancel_element_picker(project_id: str):
+    """
+    Cancels element selection mode and cleans up injected overlays and listeners.
+    """
+    try:
+        return _inspector_engine.run_task(_inspector_engine.cancel_picker, project_id)
+    except Exception as exc:
+        return {"status": "idle", "active": False, "error": str(exc)}
+
+
+@router.post("/{project_id}/save-selected-element")
+def save_selected_element(
+    project_id: str,
+    payload: SaveSelectedElementRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    Saves an individually picked element to the app_elements catalog after user confirmation.
+    Cleans up any active browser overlay.
+    """
+    project = db_service.resolve_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Application '{project_id}' not found.")
+
+    try:
+        proj_uuid = uuid.UUID(str(project["id"]))
+    except (ValueError, KeyError):
+        raise HTTPException(status_code=500, detail="Invalid project ID format.")
+
+    clean_url, fallback_page_name = clean_page_identity(payload.page_url, payload.page_name or "")
+    page_name = payload.page_name or fallback_page_name
+    now = datetime.utcnow()
+
+    # Never persist password field values
+    if payload.category == "input" and "password" in (payload.tag_name or "").lower():
+        raise HTTPException(status_code=400, detail="Password elements cannot be saved.")
+
+    existing = (
+        db.query(AppElement)
+        .filter(
+            AppElement.project_id == proj_uuid,
+            AppElement.page_url == clean_url,
+            AppElement.locator_strategy == payload.locator_strategy,
+            AppElement.locator_value == payload.locator_value,
+        )
+        .first()
+    )
+
+    if existing:
+        existing.friendly_name = payload.friendly_name
+        existing.description = payload.description or ""
+        existing.category = payload.category
+        existing.tag_name = payload.tag_name
+        existing.role = payload.role
+        existing.label = payload.label
+        existing.placeholder = payload.placeholder
+        existing.in_dialog = payload.in_dialog
+        existing.dialog_title = payload.dialog_title
+        existing.page_name = page_name
+        existing.last_verified_at = now
+        saved_element = existing
+    else:
+        new_elem = AppElement(
+            id=uuid.uuid4(),
+            project_id=proj_uuid,
+            page_url=clean_url,
+            friendly_name=payload.friendly_name,
+            description=payload.description or "",
+            category=payload.category,
+            tag_name=payload.tag_name,
+            role=payload.role,
+            label=payload.label,
+            placeholder=payload.placeholder,
+            locator_strategy=payload.locator_strategy,
+            locator_value=payload.locator_value,
+            in_dialog=payload.in_dialog,
+            dialog_title=payload.dialog_title,
+            page_name=page_name,
+            discovered_at=now,
+            last_verified_at=now,
+        )
+        db.add(new_elem)
+        saved_element = new_elem
+
+    try:
+        db.commit()
+        db.refresh(saved_element)
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"Failed to persist selected element: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Database save failed: {str(exc)}")
+
+    # Clean up picker overlays in browser session
+    try:
+        _inspector_engine.run_task(_inspector_engine.cancel_picker, project_id)
+    except Exception:
+        pass
+
+    return {
+        "id": str(saved_element.id),
+        "project_id": str(saved_element.project_id),
+        "page_url": saved_element.page_url,
+        "page_name": saved_element.page_name,
+        "friendly_name": saved_element.friendly_name,
+        "description": saved_element.description or "",
+        "category": saved_element.category,
+        "tag_name": saved_element.tag_name,
+        "role": saved_element.role,
+        "label": saved_element.label,
+        "placeholder": saved_element.placeholder,
+        "locator_strategy": saved_element.locator_strategy,
+        "locator_value": saved_element.locator_value,
+        "in_dialog": saved_element.in_dialog,
+        "dialog_title": saved_element.dialog_title,
+        "discovered_at": saved_element.discovered_at.isoformat() if saved_element.discovered_at else None,
+    }
+
+
+@router.post("/{project_id}/capture-page")
+def capture_active_page(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """
+    Scans the currently rendered page in the active browser session (or starts one)
+    and upserts all discovered elements to app_elements table.
+    """
+    project = db_service.resolve_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Application '{project_id}' not found.")
+
+    base_url = normalize_app_url((project.get("base_url") or "").rstrip("/"))
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Application does not have a configured base URL.")
+
+    username = ""
+    secret = ""
+    try:
+        creds_list = credentials_service.list_credentials(db, project["id"])
+        if creds_list:
+            dec = credentials_service.get_decrypted_credential(db, uuid.UUID(creds_list[0]["id"]))
+            username = dec.get("username", "")
+            secret = dec.get("secret", "")
+    except Exception as exc:
+        logger.warning(f"Could not retrieve credentials for capture: {exc}")
+
+    try:
+        data = _inspector_engine.run_task(
+            _inspector_engine.capture_current_page,
+            project_id=project_id,
+            project_name=project.get("name", project_id),
+            base_url=base_url,
+            username=username,
+            secret=secret,
+        )
+    except Exception as exc:
+        logger.error(f"Error capturing page for '{project_id}': {exc}", exc_info=True)
+        err_msg = str(exc) or type(exc).__name__
+        raise HTTPException(status_code=500, detail=f"Page capture failed: {err_msg}")
+
+    raw_elements: List[Dict[str, Any]] = data.get("elements", [])
+    raw_page_url: str = data.get("page_url", base_url)
+    page_title: str = data.get("page_title", "")
+    page_url, page_name = clean_page_identity(raw_page_url, page_title)
+
+    try:
+        proj_uuid = uuid.UUID(str(project["id"]))
+    except (ValueError, KeyError):
+        raise HTTPException(status_code=500, detail="Invalid project ID format.")
+
+    inserted_count = 0
+    updated_count = 0
+    now = datetime.utcnow()
+
+    for el in raw_elements:
+        if (el.get("type_attr") or "").lower() == "password":
+            continue
+
+        locator_strategy = el.get("locator_strategy", "")
+        locator_value = el.get("locator_value", "")
+        if not locator_strategy or not locator_value:
+            continue
+
+        friendly_name = el.get("friendly_name") or el.get("label") or el.get("text") or locator_value
+        description = el.get("description") or ""
+        category = el.get("category", "other")
+        tag_name = el.get("tag_name", "")
+        role = el.get("role") or None
+        label = el.get("label") or None
+        placeholder = el.get("placeholder") or None
+        in_dialog = bool(el.get("in_dialog", False))
+        dialog_title = el.get("dialog_title") or None
+
+        existing = (
+            db.query(AppElement)
+            .filter(
+                AppElement.project_id == proj_uuid,
+                AppElement.page_url == page_url,
+                AppElement.locator_strategy == locator_strategy,
+                AppElement.locator_value == locator_value,
+            )
+            .first()
+        )
+
+        if existing:
+            existing.friendly_name = friendly_name
+            existing.description = description
+            existing.category = category
+            existing.role = role
+            existing.label = label
+            existing.placeholder = placeholder
+            existing.in_dialog = in_dialog
+            existing.dialog_title = dialog_title
+            existing.page_name = page_name
+            existing.last_verified_at = now
+            updated_count += 1
+        else:
+            new_elem = AppElement(
+                id=uuid.uuid4(),
+                project_id=proj_uuid,
+                page_url=page_url,
+                friendly_name=friendly_name,
+                description=description,
+                category=category,
+                tag_name=tag_name,
+                role=role,
+                label=label,
+                placeholder=placeholder,
+                locator_strategy=locator_strategy,
+                locator_value=locator_value,
+                in_dialog=in_dialog,
+                dialog_title=dialog_title,
+                page_name=page_name,
+                discovered_at=now,
+                last_verified_at=now,
+            )
+            db.add(new_elem)
+            inserted_count += 1
+
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.error(f"DB commit failed during page capture: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to persist elements: {str(exc)}")
+
+    stored = (
+        db.query(AppElement)
+        .filter(AppElement.project_id == proj_uuid, AppElement.page_url == page_url)
+        .all()
+    )
+
+    elements_list = [
+        {
+            "id": str(e.id),
+            "project_id": str(e.project_id),
+            "page_url": e.page_url,
+            "page_name": e.page_name or page_name,
+            "friendly_name": e.friendly_name,
+            "description": e.description or "",
+            "category": e.category,
+            "tag_name": e.tag_name,
+            "role": e.role,
+            "label": e.label,
+            "placeholder": e.placeholder,
+            "locator_strategy": e.locator_strategy,
+            "locator_value": e.locator_value,
+            "in_dialog": e.in_dialog,
+            "dialog_title": e.dialog_title,
+            "discovered_at": e.discovered_at.isoformat() if e.discovered_at else None,
+        }
+        for e in stored
+    ]
+
+    return {
+        "project_id": project_id,
+        "page_url": page_url,
+        "page_name": page_name,
+        "total_scanned": len(raw_elements),
+        "inserted": inserted_count,
+        "updated": updated_count,
+        "elements": elements_list,
+    }
+
+
+@router.post("/{project_id}/discover")
+def discover_and_persist_elements(
+    project_id: str,
+    payload: DiscoverRequest = DiscoverRequest(),
+    db: Session = Depends(get_db),
+):
+    """
+    Runs element discovery for the active page and persists all discovered elements.
+    Delegates to capture_active_page.
+    """
+    return capture_active_page(project_id, db)

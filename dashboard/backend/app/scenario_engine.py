@@ -72,6 +72,31 @@ def cancel_scenario_run(run_id: str) -> bool:
     return False
 
 
+def normalize_app_url(url: str) -> str:
+    """
+    Normalizes application URLs to their valid entry points:
+    Oracle Identity Cloud Service (IDCS):
+    A naked GET on /ui/v1/signin without OAuth query parameters displays:
+    'You cannot bookmark and access the /signin URL directly.'
+    Converting it to /ui/v1/myconsole ensures Oracle IDCS generates the OAuth
+    session parameters and renders the Sign-In page with username & password fields.
+    """
+    if not url:
+        return url
+    u = url.strip()
+    if "identity.oraclecloud.com" in u:
+        if u.endswith("/ui/v1/signin"):
+            u = u[:-len("/ui/v1/signin")] + "/ui/v1/myconsole"
+        elif u.endswith("/signin"):
+            u = u[:-len("/signin")] + "/ui/v1/myconsole"
+        elif "/ui/v1/signin?" not in u and not u.endswith("/ui/v1/myconsole"):
+            if u.endswith("/"):
+                u = u + "ui/v1/myconsole"
+            elif u.endswith(".oraclecloud.com"):
+                u = u + "/ui/v1/myconsole"
+    return u
+
+
 def interpolate_variables(text_val: str, context: dict[str, Any]) -> str:
     """Replace {{variable_name}} placeholders with values from context."""
     if not isinstance(text_val, str) or "{{" not in text_val:
@@ -297,8 +322,24 @@ def resolve_locator_safely(
             raw_loc = page.locator(f"text='{l_val}'")
             return check_ambiguity(raw_loc, desc)
 
+        # Check if ID in DOM
+        try:
+            id_candidate = page.locator(f"#{l_val}")
+            if id_candidate.count() > 0:
+                return check_ambiguity(id_candidate, desc)
+        except Exception:
+            pass
+
         # Fallback to standard Playwright locator
         raw_loc = page.locator(l_val)
+        if raw_loc.count() == 0 and len(page.frames) > 1:
+            for frame in page.frames[1:]:
+                try:
+                    f_cand = frame.locator(l_val)
+                    if f_cand.count() > 0:
+                        return check_ambiguity(f_cand, desc)
+                except Exception:
+                    pass
         return check_ambiguity(raw_loc, desc)
 
 
@@ -306,17 +347,7 @@ def ensure_navigation_expanded(page: Page, log: Callable[[str], None] | None = N
     """
     Checks if an application navigation drawer / sidebar is currently collapsed,
     and expands it if so. Generic across Oracle APEX, Bootstrap, Ant Design, Material UI, and standard admin templates.
-    Never toggles if navigation is already expanded and visible!
     """
-    # 1. First verify if the navigation tree/container is ALREADY expanded and visible
-    tree_nav = page.locator("#t_TreeNav, .t-Body-nav, .a-TreeView, nav.navbar-collapse.show, aside.main-sidebar").first
-    try:
-        if tree_nav.count() > 0 and tree_nav.is_visible():
-            # Navigation drawer is already open! Do NOT toggle or click button
-            return False
-    except Exception:
-        pass
-
     nav_toggle_selectors = [
         "#t_Button_navControl",
         "button.a-Button--navControl",
@@ -330,20 +361,50 @@ def ensure_navigation_expanded(page: Page, log: Callable[[str], None] | None = N
         "[data-action='toggle-nav']",
         ".t-Header-nav-list button",
     ]
+    # 1. Check if toggle button explicitly indicates collapsed state
     for sel in nav_toggle_selectors:
         try:
             btn = page.locator(sel).first
             if btn.count() > 0 and btn.is_visible():
                 aria_exp = btn.get_attribute("aria-expanded")
-                # Expand only if explicitly collapsed
-                if aria_exp == "false" or (sel == "#t_Button_navControl" and not aria_exp):
+                if aria_exp == "false":
                     if log:
-                        log(f"Navigation menu is collapsed ({sel}). Automatically expanding...")
+                        log(f"Navigation menu toggle is collapsed (aria-expanded='false'). Expanding via {sel}...")
                     btn.click()
-                    page.wait_for_timeout(400)
+                    page.wait_for_timeout(600)
                     return True
+                elif aria_exp == "true":
+                    # Explicitly already expanded
+                    return False
         except Exception:
             continue
+
+    # 2. Check if tree container is collapsed by class or width
+    try:
+        is_collapsed = page.evaluate("""() => {
+            const body = document.body;
+            if (body && (body.classList.contains('apex-side-nav-collapsed') || body.classList.contains('js-navCollapsed'))) return true;
+            const tree = document.querySelector('#t_TreeNav, .a-TreeView, .t-Body-nav');
+            if (tree) {
+                const rect = tree.getBoundingClientRect();
+                if (rect.width <= 10 || tree.classList.contains('js-defaultCollapsed') || tree.getAttribute('aria-hidden') === 'true') {
+                    return true;
+                }
+            }
+            return false;
+        }""")
+        if is_collapsed:
+            for sel in nav_toggle_selectors:
+                btn = page.locator(sel).first
+                if btn.count() > 0 and btn.is_visible():
+                    if log:
+                        log(f"Navigation container is collapsed. Expanding via {sel}...")
+                    btn.click()
+                    page.wait_for_timeout(600)
+                    return True
+    except Exception:
+        pass
+
     return False
 
 
@@ -571,6 +632,7 @@ def handle_login(
         btn_loc = resolve_locator_safely(page, action_params.get("submit_locator_type"), custom_btn, role_hint="button")
     else:
         btn_attempts = [
+            lambda: page.locator("#idcs-signin-basic-signin-form-submit").first,
             lambda: page.get_by_role("button", name="Sign In"),
             lambda: page.get_by_role("button", name="Sign in"),
             lambda: page.get_by_role("button", name="Log In"),
@@ -645,7 +707,7 @@ def handle_navigate(
     or a URL path / route (to navigate directly).
     """
     nav_method = action_params.get("method") or action_params.get("nav_type")
-    raw_target = action_params.get("path") or action_params.get("url") or locator_val or ""
+    raw_target = action_params.get("path") or action_params.get("url") or action_params.get("target") or locator_val or ""
     raw_target = raw_target.strip()
 
     is_path = (
@@ -665,15 +727,16 @@ def handle_navigate(
         page.wait_for_timeout(400)
         return f"Navigated to '{raw_target}'", raw_target
     else:
+        clean_base = normalize_app_url(base_url) if base_url else ""
         path = raw_target or "/"
         if path.startswith(("http://", "https://", "file://", "about:", "data:")):
-            target = path
-        elif path.startswith("/") and base_url:
-            target = f"{base_url.rstrip('/')}{path}"
-        elif base_url:
-            target = f"{base_url.rstrip('/')}/{path}"
+            target = normalize_app_url(path)
+        elif path.startswith("/") and clean_base:
+            target = normalize_app_url(f"{clean_base.rstrip('/')}{path}")
+        elif clean_base:
+            target = normalize_app_url(f"{clean_base.rstrip('/')}/{path}")
         else:
-            target = path
+            target = normalize_app_url(path)
 
         log(f"Navigating to page path: {target}")
         page.goto(target, wait_until="domcontentloaded", timeout=max(step_timeout, 45000))
@@ -876,7 +939,7 @@ def run_generic_scenario(
     project_uuid = project["id"]
     project_ext_id = project["external_id"]
     run_id_str = str(run_uuid)
-    base_url = (project.get("base_url") or "").rstrip("/")
+    base_url = normalize_app_url((project.get("base_url") or "").rstrip("/"))
     browser_name = project.get("browser", "chromium").lower()
     is_headless = project.get("headless", True)
     capture_screenshots = project.get("capture_screenshots", True)
@@ -1015,6 +1078,7 @@ def run_generic_scenario(
             step_desc = step.get("description") or f"Step {step_order}: {raw_action_type}"
             is_enabled = step.get("is_enabled", True)
             step_timeout = step.get("timeout_ms") or default_step_timeout_ms
+            step_on_fail = (step.get("on_fail") or failure_policy or "stop").lower()
 
             # Interpolate parameters
             action_params: dict[str, Any] = {}
@@ -1174,6 +1238,11 @@ def run_generic_scenario(
                 else:
                     raise ValueError(f"Unsupported action_type: '{raw_action_type}'")
 
+                wait_ms = int(action_params.get("wait_after_ms") or 0)
+                if wait_ms > 0:
+                    log(f"Post-action wait: {wait_ms}ms")
+                    page.wait_for_timeout(wait_ms)
+
             except Exception as exc:
                 step_status = "failed"
                 overall_status = "failed"
@@ -1199,9 +1268,15 @@ def run_generic_scenario(
                     except Exception as shot_err:
                         log(f"Could not capture failure screenshot: {shot_err}")
 
-                if failure_policy == "stop":
+                if step_on_fail == "stop":
                     execution_aborted = True
-                    log("Scenario failure policy is 'stop'. Aborting remaining steps.")
+                    log("Per-step on_fail=stop. Aborting remaining steps.")
+                elif step_on_fail == "continue":
+                    log("Per-step on_fail=continue. Continuing to next step.")
+                elif step_on_fail.startswith("retry:"):
+                    log(f"Per-step on_fail={step_on_fail}. Marking failed and continuing.")
+                else:
+                    if failure_policy == "stop": execution_aborted = True
 
             t_duration_ms = int((time.perf_counter() - t_start) * 1000)
 
