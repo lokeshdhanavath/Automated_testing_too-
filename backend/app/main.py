@@ -94,6 +94,10 @@ class RunRequest(BaseModel):
     project_id: str | None = None
     test_file: str | None = None
     test_ids: list[str] = Field(default_factory=list)
+    headless: bool | None = None
+    browser: str | None = None
+    environment: str | None = None
+    capture_screenshots: bool | None = None
 
 
 # ---------------------------------------------------------
@@ -291,9 +295,12 @@ def execute_run(run_id: str, project_data: dict[str, Any], request_data: dict[st
         env["DASHBOARD_RUN_ID"] = run_id
         env["VERIQON_PROJECT_ID"] = project_ext_id
         env["VERIQON_PROJECT_UUID"] = str(project_uuid)
-        env["VERIQON_HEADLESS"] = str(project_data.get("headless", True)).lower()
-        env["VERIQON_BROWSER"] = str(project_data.get("browser", "chromium")).lower()
-        env["VERIQON_CAPTURE_SCREENSHOTS"] = str(project_data.get("capture_screenshots", True)).lower()
+        req_headless = request_data.get("headless")
+        env["VERIQON_HEADLESS"] = str(req_headless if req_headless is not None else project_data.get("headless", True)).lower()
+        req_browser = request_data.get("browser")
+        env["VERIQON_BROWSER"] = str(req_browser if req_browser else project_data.get("browser", "chromium")).lower()
+        req_capture = request_data.get("capture_screenshots")
+        env["VERIQON_CAPTURE_SCREENSHOTS"] = str(req_capture if req_capture is not None else project_data.get("capture_screenshots", True)).lower()
         env["VERIQON_CAPTURE_VIDEO"] = str(project_data.get("capture_video", False)).lower()
         env["VERIQON_BASE_URL"] = str(project_data.get("base_url", "")).rstrip("/")
 
@@ -948,12 +955,14 @@ def start_run(request: RunRequest):
     # Persist queued run in PostgreSQL
     db = SessionLocal()
     try:
+        req_env = request.environment or project.get("default_environment", "QA")
+        req_browser = request.browser or project.get("browser", "chromium")
         db_service.create_test_run(
             db,
             run_uuid=run_uuid,
             project_uuid=project_uuid,
-            environment=project.get("default_environment", "QA"),
-            browser=project.get("browser", "chromium"),
+            environment=req_env,
+            browser=req_browser,
             selected_tests=request.test_ids or ([request.test_file] if request.test_file else []),
         )
     finally:

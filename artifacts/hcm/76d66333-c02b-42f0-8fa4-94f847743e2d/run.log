@@ -1,0 +1,13 @@
+[2026-10-27 16:35:53 UTC] Starting execution for: 'HCM Login Test' (Run ID: 76d66333-c02b-42f0-8fa4-94f847743e2d)
+[2026-10-27 16:35:53 UTC] Target Application: 'HCM' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-27 16:35:53 UTC] Browser: chromium (Headless: True)
+[2026-10-27 16:35:56 UTC] [RUNNING] Step 1: Open HCM application (action: open_app)
+[2026-10-27 16:35:56 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-27 16:36:00 UTC] [PASSED] Step 1 finished in 3785ms
+[2026-10-27 16:36:00 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-27 16:36:00 UTC] [ERROR] Step 2 failed: Could not automatically locate the Username field. Please specify a username locator in the action settings.
+[2026-10-27 16:36:01 UTC] Failure screenshot captured: failure_step_2.png
+[2026-10-27 16:36:01 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-27 16:36:01 UTC] Video saved and registered: recording.webm
+[2026-10-27 16:36:01 UTC] Workflow execution completed with status: FAILED
+[2026-10-27 16:36:01 UTC] Summary: 1/2 passed, 1 failed, 0 skipped.

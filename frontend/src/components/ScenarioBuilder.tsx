@@ -40,6 +40,8 @@ import {
   createScenario,
   getProjectCredentials,
   runDynamicWorkflow,
+  listDiscoveredElements,
+  parseWorkflowCsv,
 } from "../services/api";
 import type {
   ScenarioItem,
@@ -361,6 +363,33 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
 
   // Element Discovery / Catalog states
   const [showCatalog, setShowCatalog] = useState(false);
+  const [catalogTarget, setCatalogTarget] = useState<"username" | "password" | "submit" | "navigate" | "main" | null>(null);
+  const [headlessMode, setHeadlessMode] = useState<boolean>(true);
+
+  async function handleImportActionsFromCsv(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    try {
+      setStatusMessage({ type: "info", text: `Importing actions from ${file.name}...` });
+      const parsed = await parseWorkflowCsv(file, projectId);
+      if (!parsed.steps || parsed.steps.length === 0) {
+        setStatusMessage({ type: "error", text: "No executable action steps found in CSV file." });
+        return;
+      }
+      setWorkflowSteps((prev) => [...prev, ...parsed.steps]);
+      const matchedCount = parsed.steps.filter((s: any) => s.action_params?.matched_from_catalog).length;
+      setStatusMessage({
+        type: "success",
+        text: `Successfully imported ${parsed.steps.length} action step(s) from CSV! ${matchedCount} element(s) resolved with nearby catalog matching.`,
+      });
+    } catch (err: any) {
+      setStatusMessage({
+        type: "error",
+        text: `Failed to import CSV: ${err?.message || "Unknown error"}`,
+      });
+    }
+  }
 
   function handlePickedElement(el: InspectElement) {
     if (currentPickingTarget === "username") {
@@ -443,7 +472,7 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
 
   // Execution state
   const [executing, setExecuting] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
   // Load application credentials & saved workflows
   useEffect(() => {
@@ -700,6 +729,7 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
         timeout_seconds: 120,
         dataset_row: activeDataRow,
         dataset_rows: csvRows.length > 0 ? csvRows : undefined,
+        headless: headlessMode,
       });
 
       setStatusMessage({ type: "success", text: `Workflow execution started! Run ID: ${response.run_id}` });
@@ -739,6 +769,64 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
 
   function handleCatalogSelect(el: DiscoveredElement) {
     setShowCatalog(false);
+    if (catalogTarget === "username") {
+      setModalStepData((prev) => ({
+        ...prev,
+        action_params: {
+          ...prev.action_params,
+          username_locator: el.locator_value,
+          username_locator_type: el.locator_strategy,
+          username_friendly_name: el.friendly_name,
+        },
+      }));
+      setCatalogTarget(null);
+      return;
+    }
+    if (catalogTarget === "password") {
+      setModalStepData((prev) => ({
+        ...prev,
+        action_params: {
+          ...prev.action_params,
+          password_locator: el.locator_value,
+          password_locator_type: el.locator_strategy,
+          password_friendly_name: el.friendly_name,
+        },
+      }));
+      setCatalogTarget(null);
+      return;
+    }
+    if (catalogTarget === "submit") {
+      setModalStepData((prev) => ({
+        ...prev,
+        action_params: {
+          ...prev.action_params,
+          submit_locator: el.locator_value,
+          submit_locator_type: el.locator_strategy,
+          submit_friendly_name: el.friendly_name,
+        },
+      }));
+      setCatalogTarget(null);
+      return;
+    }
+    if (catalogTarget === "navigate" || modalStepData.action_type === "navigate") {
+      setModalStepData((prev) => ({
+        ...prev,
+        locator_value: el.locator_value || el.friendly_name,
+        locator_type: el.locator_strategy || "smart",
+        description: prev.description || `Navigate to ${el.friendly_name}`,
+        action_params: {
+          ...prev.action_params,
+          target: el.friendly_name,
+          path: el.locator_value || el.friendly_name,
+          method: "click",
+          element_friendly_name: el.friendly_name,
+          element_category: el.category,
+        },
+      }));
+      setCatalogTarget(null);
+      return;
+    }
+    setCatalogTarget(null);
     setModalStepData((prev) => ({
       ...prev,
       locator_value: el.locator_value,
@@ -917,25 +1005,87 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
               <span>Stop Run</span>
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={() => void handleRunWorkflow()}
-              disabled={executing || workflowSteps.length === 0}
-              className="button button-primary button-small"
-              style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "7px 16px" }}
-            >
-              {executing ? (
-                <>
-                  <div className="vq-spinner-sm" />
-                  <span>Starting...</span>
-                </>
-              ) : (
-                <>
-                  <Play size={14} fill="currentColor" />
-                  <span>Run Workflow</span>
-                </>
-              )}
-            </button>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              {/* Headless vs Live Browser Mode Toggle */}
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  background: "var(--v-surface-2)",
+                  padding: "3px 6px",
+                  borderRadius: 6,
+                  border: "1px solid var(--v-border)",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setHeadlessMode(true)}
+                  style={{
+                    background: headlessMode ? "var(--v-surface)" : "transparent",
+                    color: headlessMode ? "var(--v-text)" : "var(--v-text-secondary)",
+                    border: headlessMode ? "1px solid var(--v-border)" : "none",
+                    borderRadius: 4,
+                    padding: "4px 8px",
+                    fontSize: "0.74rem",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                  title="Run in high-speed headless background"
+                >
+                  ⚡ Headless
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHeadlessMode(false)}
+                  style={{
+                    background: !headlessMode ? "#DEF7EC" : "transparent",
+                    color: !headlessMode ? "#03543F" : "var(--v-text-secondary)",
+                    border: !headlessMode ? "1px solid #86EFAC" : "none",
+                    borderRadius: 4,
+                    padding: "4px 8px",
+                    fontSize: "0.74rem",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                  title="Open real browser window and watch live automation on screen"
+                >
+                  👁️ Watch Live
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void handleRunWorkflow()}
+                disabled={executing || workflowSteps.length === 0}
+                className="button button-primary button-small"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "7px 16px",
+                  boxShadow: executing ? "0 0 14px rgba(37, 99, 235, 0.4)" : undefined,
+                }}
+              >
+                {executing ? (
+                  <>
+                    <div className="vq-spinner-sm" style={{ width: 14, height: 14, borderWidth: 2 }} />
+                    <span style={{ animation: "vq-pulse 1.2s infinite" }}>Starting Engine...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play size={14} fill="currentColor" />
+                    <span>Run Workflow</span>
+                  </>
+                )}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -1110,10 +1260,29 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
               2. AVAILABLE ACTIONS (Responsive 4-column Grid)
           ========================================================================= */}
       <div className="sb-section">
-        <div className="sb-section-header">
+        <div className="sb-section-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <div>
             <h2 className="sb-section-title">Available actions</h2>
-            <p className="sb-section-desc">Add the steps you want Veriqon to perform.</p>
+            <p className="sb-section-desc">Add the steps you want Veriqon to perform, or import actions directly from a CSV file.</p>
+          </div>
+          <div>
+            <input
+              id="sb-import-csv-actions-file"
+              type="file"
+              accept=".csv"
+              style={{ display: "none" }}
+              onChange={handleImportActionsFromCsv}
+            />
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={() => document.getElementById("sb-import-csv-actions-file")?.click()}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 700, borderColor: "var(--v-accent)", color: "var(--v-accent)" }}
+              title="Import action sequence from CSV file with automatic nearby catalog element resolution"
+            >
+              <FileSpreadsheet size={15} />
+              Import Actions from CSV
+            </button>
           </div>
         </div>
 
@@ -1464,7 +1633,18 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                 style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
               >
                 <Upload size={14} />
-                Upload CSV
+                Upload Dataset CSV
+              </button>
+
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                onClick={() => document.getElementById("sb-import-csv-actions-file")?.click()}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, borderColor: "var(--v-accent)", color: "var(--v-accent)", fontWeight: 600 }}
+                title="If your CSV contains action steps (Action, Target Element, Input Data), import them directly into Workflow Steps"
+              >
+                <Layers size={14} />
+                Import Actions from CSV
               </button>
 
               <button
@@ -1822,26 +2002,101 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                   </div>
 
                   {/* Form Field Target Locators with pickers */}
-                  <div style={{ background: "var(--v-surface-2)", borderRadius: 10, padding: 12, border: "1px solid var(--v-border)", display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--v-text)" }}>
-                      Login Form Elements (Auto-detected or Pick from Page)
+                  <div style={{ background: "var(--v-surface-2)", borderRadius: 10, padding: 12, border: "1px solid var(--v-border)", display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                          Login Form Elements
+                        </div>
+                        <div style={{ fontSize: "0.72rem", color: "var(--v-text-muted)" }}>
+                          Pick from Catalog to optimize execution speed or let Veriqon auto-detect.
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="button button-small"
+                        style={{
+                          fontSize: "0.74rem",
+                          padding: "4px 10px",
+                          background: "rgba(101, 234, 209, 0.12)",
+                          color: "var(--v-accent)",
+                          border: "1px solid rgba(101, 234, 209, 0.35)",
+                          borderRadius: 6,
+                          cursor: "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
+                          fontWeight: 700,
+                        }}
+                        onClick={async () => {
+                          try {
+                            const elements = await listDiscoveredElements(projectId);
+                            if (!elements || elements.length === 0) {
+                              setStatusMessage({ type: "error", text: "No elements found in catalog. Run Discovery first or pick manually." });
+                              return;
+                            }
+                            const userEl = elements.find((e: DiscoveredElement) =>
+                              (e.category === "input" || e.tag_name === "input" || e.role === "textbox") &&
+                              /user|email|login|account|id/i.test(e.friendly_name + " " + (e.label || "") + " " + (e.placeholder || ""))
+                            );
+                            const passEl = elements.find((e: DiscoveredElement) =>
+                              (e.category === "input" || e.tag_name === "input") &&
+                              /pass/i.test(e.friendly_name + " " + (e.label || "") + " " + (e.placeholder || ""))
+                            );
+                            const submitEl = elements.find((e: DiscoveredElement) =>
+                              (e.category === "button" || e.tag_name === "button" || e.role === "button") &&
+                              /sign\s*in|log\s*in|login|submit|continue|next/i.test(e.friendly_name + " " + (e.label || ""))
+                            );
+                            setModalStepData((prev: any) => ({
+                              ...prev,
+                              action_params: {
+                                ...prev.action_params,
+                                ...(userEl ? { username_locator: userEl.locator_value, username_locator_type: userEl.locator_strategy, username_friendly_name: userEl.friendly_name } : {}),
+                                ...(passEl ? { password_locator: passEl.locator_value, password_locator_type: passEl.locator_strategy, password_friendly_name: passEl.friendly_name } : {}),
+                                ...(submitEl ? { submit_locator: submitEl.locator_value, submit_locator_type: submitEl.locator_strategy, submit_friendly_name: submitEl.friendly_name } : {}),
+                              },
+                            }));
+                            setStatusMessage({ type: "success", text: "⚡ Auto-detected and filled login elements directly from Catalog!" });
+                          } catch (err: any) {
+                            setStatusMessage({ type: "error", text: err?.message || "Failed to auto-detect login elements from catalog." });
+                          }
+                        }}
+                        title="Auto-detect and fill username, password, and submit elements from discovered catalog"
+                      >
+                        <Sparkles size={13} />
+                        1-Click Auto-Fill from Catalog
+                      </button>
                     </div>
 
                     {/* Username Field */}
                     <div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                         <label className="sb-label" style={{ margin: 0 }}>Username Field</label>
-                        <button
-                          type="button"
-                          className="sb-picker-btn-mini"
-                          onClick={() => {
-                            setCurrentPickingTarget("username");
-                            setElementPickerOpen(true);
-                          }}
-                        >
-                          <MousePointer size={12} />
-                          {modalStepData.action_params?.username_locator ? "Re-pick" : "Inspect & Pick"}
-                        </button>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <button
+                            type="button"
+                            className="sb-picker-btn-mini"
+                            style={{ background: "rgba(101, 234, 209, 0.12)", color: "var(--v-accent)", borderColor: "rgba(101, 234, 209, 0.3)", fontWeight: 600 }}
+                            onClick={() => {
+                              setCatalogTarget("username");
+                              setShowCatalog(true);
+                            }}
+                            title="Pick Username input field directly from Element Catalog"
+                          >
+                            📋 Pick from Catalog
+                          </button>
+                          <button
+                            type="button"
+                            className="sb-picker-btn-mini"
+                            onClick={() => {
+                              setCurrentPickingTarget("username");
+                              setElementPickerOpen(true);
+                            }}
+                          >
+                            <MousePointer size={12} />
+                            {modalStepData.action_params?.username_locator ? "Re-pick" : "Inspect & Pick"}
+                          </button>
+                        </div>
                       </div>
                       <input
                         type="text"
@@ -1852,27 +2107,47 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                             action_params: { ...modalStepData.action_params, username_locator: e.target.value },
                           })
                         }
-                        placeholder="Auto-detected (e.g. textbox:Username, #username)"
+                        placeholder="Auto-detected (e.g. textbox:Username, #username, #P9999_USERNAME)"
                         className="sb-input"
                         style={{ fontFamily: "monospace" }}
                       />
+                      {modalStepData.action_params?.username_friendly_name && (
+                        <div style={{ marginTop: 4, fontSize: "0.72rem", color: "var(--v-accent)", display: "flex", alignItems: "center", gap: 4 }}>
+                          <CheckCircle2 size={12} />
+                          <span>Catalog element: <strong>{modalStepData.action_params.username_friendly_name}</strong></span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Password Field */}
                     <div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                         <label className="sb-label" style={{ margin: 0 }}>Password Field</label>
-                        <button
-                          type="button"
-                          className="sb-picker-btn-mini"
-                          onClick={() => {
-                            setCurrentPickingTarget("password");
-                            setElementPickerOpen(true);
-                          }}
-                        >
-                          <MousePointer size={12} />
-                          {modalStepData.action_params?.password_locator ? "Re-pick" : "Inspect & Pick"}
-                        </button>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <button
+                            type="button"
+                            className="sb-picker-btn-mini"
+                            style={{ background: "rgba(101, 234, 209, 0.12)", color: "var(--v-accent)", borderColor: "rgba(101, 234, 209, 0.3)", fontWeight: 600 }}
+                            onClick={() => {
+                              setCatalogTarget("password");
+                              setShowCatalog(true);
+                            }}
+                            title="Pick Password input field directly from Element Catalog"
+                          >
+                            📋 Pick from Catalog
+                          </button>
+                          <button
+                            type="button"
+                            className="sb-picker-btn-mini"
+                            onClick={() => {
+                              setCurrentPickingTarget("password");
+                              setElementPickerOpen(true);
+                            }}
+                          >
+                            <MousePointer size={12} />
+                            {modalStepData.action_params?.password_locator ? "Re-pick" : "Inspect & Pick"}
+                          </button>
+                        </div>
                       </div>
                       <input
                         type="text"
@@ -1883,27 +2158,47 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                             action_params: { ...modalStepData.action_params, password_locator: e.target.value },
                           })
                         }
-                        placeholder="Auto-detected (e.g. textbox:Password, #password)"
+                        placeholder="Auto-detected (e.g. textbox:Password, #password, #P9999_PASSWORD)"
                         className="sb-input"
                         style={{ fontFamily: "monospace" }}
                       />
+                      {modalStepData.action_params?.password_friendly_name && (
+                        <div style={{ marginTop: 4, fontSize: "0.72rem", color: "var(--v-accent)", display: "flex", alignItems: "center", gap: 4 }}>
+                          <CheckCircle2 size={12} />
+                          <span>Catalog element: <strong>{modalStepData.action_params.password_friendly_name}</strong></span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Submit Button */}
                     <div>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                         <label className="sb-label" style={{ margin: 0 }}>Submit Button</label>
-                        <button
-                          type="button"
-                          className="sb-picker-btn-mini"
-                          onClick={() => {
-                            setCurrentPickingTarget("submit");
-                            setElementPickerOpen(true);
-                          }}
-                        >
-                          <MousePointer size={12} />
-                          {modalStepData.action_params?.submit_locator ? "Re-pick" : "Inspect & Pick"}
-                        </button>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <button
+                            type="button"
+                            className="sb-picker-btn-mini"
+                            style={{ background: "rgba(101, 234, 209, 0.12)", color: "var(--v-accent)", borderColor: "rgba(101, 234, 209, 0.3)", fontWeight: 600 }}
+                            onClick={() => {
+                              setCatalogTarget("submit");
+                              setShowCatalog(true);
+                            }}
+                            title="Pick Submit/Sign In button directly from Element Catalog"
+                          >
+                            📋 Pick from Catalog
+                          </button>
+                          <button
+                            type="button"
+                            className="sb-picker-btn-mini"
+                            onClick={() => {
+                              setCurrentPickingTarget("submit");
+                              setElementPickerOpen(true);
+                            }}
+                          >
+                            <MousePointer size={12} />
+                            {modalStepData.action_params?.submit_locator ? "Re-pick" : "Inspect & Pick"}
+                          </button>
+                        </div>
                       </div>
                       <input
                         type="text"
@@ -1918,6 +2213,12 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                         className="sb-input"
                         style={{ fontFamily: "monospace" }}
                       />
+                      {modalStepData.action_params?.submit_friendly_name && (
+                        <div style={{ marginTop: 4, fontSize: "0.72rem", color: "var(--v-accent)", display: "flex", alignItems: "center", gap: 4 }}>
+                          <CheckCircle2 size={12} />
+                          <span>Catalog element: <strong>{modalStepData.action_params.submit_friendly_name}</strong></span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1985,34 +2286,75 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                               </div>
                             </div>
                           </div>
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              type="button"
+                              className="sb-picker-btn-mini"
+                              style={{ background: "rgba(101, 234, 209, 0.12)", color: "var(--v-accent)", borderColor: "rgba(101, 234, 209, 0.3)", fontWeight: 600 }}
+                              onClick={() => {
+                                setCatalogTarget("navigate");
+                                setShowCatalog(true);
+                              }}
+                              title="Pick navigation target directly from Element Catalog"
+                            >
+                              📋 Catalog
+                            </button>
+                            <button
+                              type="button"
+                              className="sb-picker-btn-mini"
+                              onClick={() => {
+                                setCurrentPickingTarget("main");
+                                setElementPickerOpen(true);
+                              }}
+                            >
+                              Re-pick
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 8 }}>
                           <button
                             type="button"
-                            className="sb-picker-btn-mini"
+                            className="sb-picker-btn"
+                            style={{ flex: 1, justifyContent: "center", padding: "10px 14px", background: "rgba(101, 234, 209, 0.12)", color: "var(--v-accent)", borderColor: "rgba(101, 234, 209, 0.3)", fontWeight: 600 }}
+                            onClick={() => {
+                              setCatalogTarget("navigate");
+                              setShowCatalog(true);
+                            }}
+                          >
+                            📋 Pick from Catalog
+                          </button>
+                          <button
+                            type="button"
+                            className="sb-picker-btn"
+                            style={{ flex: 1, justifyContent: "center", padding: "10px 14px" }}
                             onClick={() => {
                               setCurrentPickingTarget("main");
                               setElementPickerOpen(true);
                             }}
                           >
-                            Pick Different Menu
+                            <Sparkles size={16} />
+                            Inspect & Pick from Page
                           </button>
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="sb-picker-btn"
-                          style={{ justifyContent: "center", padding: "10px 16px" }}
-                          onClick={() => {
-                            setCurrentPickingTarget("main");
-                            setElementPickerOpen(true);
-                          }}
-                        >
-                          <Sparkles size={16} />
-                          Inspect & Pick Menu / Link from Page
-                        </button>
                       )}
 
                       <div>
-                        <label className="sb-label">Visible Menu or Link Name <b>*</b></label>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                          <label className="sb-label" style={{ margin: 0 }}>Visible Menu or Link Name <b>*</b></label>
+                          {!modalStepData.locator_value && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCatalogTarget("navigate");
+                                setShowCatalog(true);
+                              }}
+                              style={{ background: "transparent", border: "none", color: "var(--v-accent)", fontSize: "0.75rem", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, padding: 0 }}
+                            >
+                              📋 Pick from Catalog
+                            </button>
+                          )}
+                        </div>
                         <input
                           type="text"
                           required
@@ -2027,8 +2369,14 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                           placeholder='e.g. "My Timesheet", "Dashboard", "Projects"'
                           className="sb-input"
                         />
+                        {modalStepData.action_params?.element_friendly_name && (
+                          <div style={{ marginTop: 4, fontSize: "0.72rem", color: "var(--v-accent)", display: "flex", alignItems: "center", gap: 4 }}>
+                            <CheckCircle2 size={12} />
+                            <span>Catalog element: <strong>{modalStepData.action_params.element_friendly_name}</strong></span>
+                          </div>
+                        )}
                         <small style={{ display: "block", marginTop: 4, fontSize: "0.74rem", color: "var(--v-text-secondary)" }}>
-                          Enter the visible text of the menu or link to click.
+                          Enter the visible text of the menu or link to click, or select an element directly from the project catalog.
                         </small>
                       </div>
                     </div>
@@ -2579,7 +2927,7 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
               )}
 
               {/* Advanced Locator Strategy Selector (Progressive Disclosure) */}
-              {["fill_input", "click_element", "select_option", "verify_element", "wait_for_element"].includes(
+              {["navigate", "fill_input", "click_element", "select_option", "verify_element", "wait_for_element"].includes(
                 modalStepData.action_type
               ) && (
                 <div style={{ paddingTop: 8, borderTop: "1px solid var(--v-border)" }}>
@@ -2596,7 +2944,10 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setShowCatalog(true)}
+                      onClick={() => {
+                        if (modalStepData.action_type === "navigate") setCatalogTarget("navigate");
+                        setShowCatalog(true);
+                      }}
                       style={{
                         background: "transparent",
                         border: "none",

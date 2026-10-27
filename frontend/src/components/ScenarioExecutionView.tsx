@@ -29,7 +29,8 @@ export const ScenarioExecutionView: React.FC<ScenarioExecutionViewProps> = ({
 }) => {
   const [modalImage, setModalImage] = useState<string | null>(null);
 
-  if (stepResults.length === 0) {
+  const isRunning = status.toLowerCase() === "running" || status.toLowerCase() === "queued";
+  if (stepResults.length === 0 && !isRunning) {
     return null;
   }
 
@@ -259,6 +260,53 @@ export const ScenarioExecutionView: React.FC<ScenarioExecutionViewProps> = ({
               </div>
             );
           })}
+
+          {isRunning && (
+            <div
+              className="vq-live-step-active"
+              style={{
+                padding: "14px 18px",
+                borderRadius: 8,
+                border: "1px solid rgba(37, 99, 235, 0.3)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div className="vq-live-pulse-dot" />
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span
+                      style={{
+                        background: "#2563eb",
+                        color: "#ffffff",
+                        padding: "2px 8px",
+                        borderRadius: 4,
+                        fontSize: "0.74rem",
+                        fontFamily: "monospace",
+                        fontWeight: 700,
+                      }}
+                    >
+                      STEP {stepResults.length + 1}
+                    </span>
+                    <span style={{ fontWeight: 700, color: "var(--v-text)", fontSize: "0.92rem" }}>
+                      Executing live step in Playwright...
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "0.75rem", color: "var(--v-text-secondary)", marginTop: 4 }}>
+                    Continuously running actions and resolving selectors in browser
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div className="vq-spinner-sm" style={{ width: 16, height: 16, borderWidth: 2 }} />
+                <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#2563eb", fontFamily: "monospace" }}>
+                  IN PROGRESS
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Embedded HTML5 Video Player if video was recorded for this run */}

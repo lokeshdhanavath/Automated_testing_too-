@@ -1,0 +1,21 @@
+[2026-10-27 18:30:05 UTC] Starting execution for: 'basic flow' (Run ID: f7f96e2d-1425-4240-86e3-c22c4d382e3c)
+[2026-10-27 18:30:05 UTC] Target Application: 'HCM' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-27 18:30:05 UTC] Browser: chromium (Headless: True)
+[2026-10-27 18:30:05 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-27 18:30:08 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-27 18:30:08 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-27 18:30:14 UTC] [PASSED] Step 1 finished in 6384ms
+[2026-10-27 18:30:14 UTC] [RUNNING] Step 2: Login with application vault credentials (action: login)
+[2026-10-27 18:30:14 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-27 18:30:17 UTC] Entering encrypted vault password into password field...
+[2026-10-27 18:30:17 UTC] Submitting login form...
+[2026-10-27 18:30:48 UTC] Waiting for post-login page load, transitions, and authentication redirects...
+[2026-10-27 18:30:48 UTC] Waiting for post-login application page to load completely...
+[2026-10-27 18:30:48 UTC] Displaying authenticated post-login page in video stream (6000ms)...
+[2026-10-27 18:30:54 UTC] [PASSED] Step 2 finished in 40079ms
+[2026-10-27 18:30:54 UTC] [RUNNING] Step 3: Verify element visibility (action: verify_element)
+[2026-10-27 18:30:54 UTC] Executing verification: type='visible', target='pt1:_UIScil1u', expected=''
+[2026-10-27 18:30:54 UTC] [PASSED] Step 3 finished in 6ms
+[2026-10-27 18:31:03 UTC] Video saved and registered: recording.webm
+[2026-10-27 18:31:03 UTC] Workflow execution completed with status: PASSED
+[2026-10-27 18:31:03 UTC] Summary: 3/3 passed, 0 failed, 0 skipped.

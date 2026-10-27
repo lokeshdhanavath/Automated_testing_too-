@@ -1,0 +1,17 @@
+[2026-10-27 16:27:47 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 1aa1adbd-ae93-49ce-8434-29ab75f143e7)
+[2026-10-27 16:27:47 UTC] Target Application: 'HCM' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-27 16:27:47 UTC] Browser: chromium (Headless: True)
+[2026-10-27 16:27:47 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-27 16:27:50 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-27 16:27:50 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-27 16:27:52 UTC] [PASSED] Step 1 finished in 2752ms
+[2026-10-27 16:27:52 UTC] [RUNNING] Step 2: Login with application vault credentials (action: login)
+[2026-10-27 16:27:52 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-27 16:27:52 UTC] [ERROR] Step 2 failed: Locator.fill: Unexpected token "|" while parsing css selector "#idcs-signin-basic-signin-form-username|input". Did you mean to CSS.escape it?
+Call log:
+  - waiting for #idcs-signin-basic-signin-form-username|input
+
+[2026-10-27 16:27:53 UTC] Failure screenshot captured: failure_step_2.png
+[2026-10-27 16:27:53 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-27 16:27:53 UTC] Workflow execution completed with status: FAILED
+[2026-10-27 16:27:53 UTC] Summary: 1/2 passed, 1 failed, 0 skipped.

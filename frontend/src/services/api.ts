@@ -316,6 +316,10 @@ export async function startRun(payload: {
   project_id?: string;
   test_file?: string;
   test_ids?: string[];
+  headless?: boolean;
+  browser?: string;
+  environment?: string;
+  capture_screenshots?: boolean;
 }): Promise<StartRunResponse> {
   return apiRequest<StartRunResponse>("/api/runs", {
     method: "POST",
@@ -421,7 +425,7 @@ export interface CsvValidationResponse {
 }
 
 
-export async function parseWorkflowCsv(file: File, projectId: string): Promise<{filename: string; project_id: string; steps: ScenarioStep[]}> {
+export async function parseWorkflowCsv(file: File, projectId: string): Promise<{filename: string; project_id: string; total_steps?: number; resolved_catalog_elements?: number; steps: ScenarioStep[]}> {
   const form = new FormData();
   form.append("file", file);
   form.append("project_id", projectId);
@@ -593,6 +597,8 @@ export interface ScenarioRunPayload {
   credential_id?: string;
   data_profile_id?: string;
   dataset_row_index?: number;
+  headless?: boolean;
+  browser?: string;
 }
 
 // Credentials API
@@ -711,6 +717,8 @@ export interface DynamicWorkflowPayload {
   save_as_scenario?: boolean;
   dataset_row?: Record<string, any>;
   dataset_rows?: Record<string, any>[];
+  headless?: boolean;
+  browser?: string;
 }
 
 export async function runDynamicWorkflow(

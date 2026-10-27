@@ -200,7 +200,11 @@ def resolve_locator_safely(
 
     # 5. CSS Selector
     elif l_type == "css":
-        raw_loc = page.locator(l_val)
+        if l_val.startswith("#") and any(c in l_val for c in ("|", ":", "[", "]", "$")):
+            clean_id = l_val.lstrip("#").replace('\\', '\\\\').replace('"', '\\"')
+            raw_loc = page.locator(f'[id="{clean_id}"]')
+        else:
+            raw_loc = page.locator(l_val)
         return check_ambiguity(raw_loc, desc)
 
     # 6. XPath
@@ -210,7 +214,8 @@ def resolve_locator_safely(
 
     # 7. Common HTML Attributes
     elif l_type == "id":
-        raw_loc = page.locator(f"#{l_val}")
+        clean_id = l_val.lstrip("#").replace('\\', '\\\\').replace('"', '\\"')
+        raw_loc = page.locator(f'[id="{clean_id}"]')
         return check_ambiguity(raw_loc, desc)
     elif l_type == "name":
         raw_loc = page.locator(f"[name='{l_val}']")
@@ -226,9 +231,14 @@ def resolve_locator_safely(
             raw_loc = page.locator(f"xpath={l_val}")
             return check_ambiguity(raw_loc, desc)
 
-        # Check if clearly CSS ID or class or attribute
-        if (l_val.startswith("#") and " " not in l_val and ":" not in l_val) or \
-           (l_val.startswith(".") and " " not in l_val) or \
+        # Check if clearly CSS ID
+        if l_val.startswith("#"):
+            clean_id = l_val.lstrip("#").replace('\\', '\\\\').replace('"', '\\"')
+            raw_loc = page.locator(f'[id="{clean_id}"]')
+            return check_ambiguity(raw_loc, desc)
+
+        # Check if clearly class or attribute selector
+        if (l_val.startswith(".") and " " not in l_val) or \
            (l_val.startswith("[") and l_val.endswith("]")):
             raw_loc = page.locator(l_val)
             return check_ambiguity(raw_loc, desc)
@@ -324,7 +334,8 @@ def resolve_locator_safely(
 
         # Check if ID in DOM
         try:
-            id_candidate = page.locator(f"#{l_val}")
+            clean_id = l_val.lstrip("#").replace('\\', '\\\\').replace('"', '\\"')
+            id_candidate = page.locator(f'[id="{clean_id}"]')
             if id_candidate.count() > 0:
                 return check_ambiguity(id_candidate, desc)
         except Exception:
@@ -535,12 +546,13 @@ def handle_open_app(
         target = raw_path
 
     log(f"Opening application at: {target}")
-    page.goto(target, wait_until="domcontentloaded", timeout=max(step_timeout, 45000))
+    # High-speed navigation: domcontentloaded is ready immediately
+    page.goto(target, wait_until="domcontentloaded", timeout=max(step_timeout, 30000))
     try:
-        page.wait_for_load_state("load", timeout=10000)
+        page.wait_for_load_state("load", timeout=3000)
     except Exception:
         pass
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(300)
     return f"Opened application at {target}", target
 
 
@@ -571,16 +583,18 @@ def handle_login(
     user_loc = None
     custom_user = action_params.get("username_locator") or (locator_val if locator_type in ("label", "id", "name", "css", "xpath") else None)
     if custom_user:
-        user_loc = resolve_locator_safely(page, action_params.get("username_locator_type") or locator_type, custom_user, role_hint="textbox")
+        u_type = action_params.get("username_locator_type") or locator_type
+        user_loc = resolve_locator_safely(page, u_type, custom_user, role_hint="textbox")
     else:
         # Multi-locator strategy for username
         username_attempts = [
+            lambda: page.locator('[id="idcs-signin-basic-signin-form-username|input"]').first,
+            lambda: page.locator("input[id*='signin-form-username']").first,
             lambda: page.get_by_role("textbox", name="Username"),
             lambda: page.get_by_role("textbox", name="User ID"),
             lambda: page.get_by_role("textbox", name="Email"),
             lambda: page.get_by_label(re.compile("username|email|user id", re.I)),
             lambda: page.get_by_placeholder(re.compile("username|email", re.I)),
-            lambda: page.locator("input[id*='signin-form-username']").first,
             lambda: page.locator("input[name='username']").first,
             lambda: page.locator("#P9999_USERNAME").first,
             lambda: page.locator("#username").first,
@@ -598,17 +612,64 @@ def handle_login(
     if not user_loc:
         raise ValueError("Could not automatically locate the Username field. Please specify a username locator in the action settings.")
 
+    # Fill username
+    log(f"Entering username for account '{user_val}' into login form...")
+    user_loc.fill(user_val, timeout=step_timeout)
+
+    # Check for Multi-Step Login (e.g. Oracle Cloud IDCS, Google, Okta, Azure AD)
+    # where the password field is hidden until "Next" / "Continue" is clicked
+    next_btn = None
+    for next_attempt in [
+        lambda: page.locator("#idcs-signin-basic-signin-form-submit").first,
+        lambda: page.locator("button[id*='signin-form-submit']").first,
+        lambda: page.get_by_role("button", name=re.compile(r"^(next|continue)$", re.I)),
+        lambda: page.locator("button:has-text('Next'), button:has-text('Continue')").first,
+    ]:
+        try:
+            cand = next_attempt()
+            if cand.count() > 0 and cand.is_visible():
+                next_btn = cand
+                break
+        except Exception:
+            pass
+
+    # Check if password field is currently visible on the page
+    pass_visible = False
+    custom_pass = action_params.get("password_locator")
+    if custom_pass:
+        try:
+            cand_p = resolve_locator_safely(page, action_params.get("password_locator_type"), custom_pass, role_hint="textbox")
+            pass_visible = cand_p.count() > 0 and cand_p.is_visible()
+        except Exception:
+            pass
+    else:
+        try:
+            pass_cand = page.locator("input[type='password'], [id*='password']").first
+            pass_visible = pass_cand.count() > 0 and pass_cand.is_visible()
+        except Exception:
+            pass
+
+    # If password is NOT yet visible and a Next button exists, click Next first
+    if not pass_visible and next_btn:
+        log("Detected multi-step login. Submitting username via 'Next' button...")
+        next_btn.click(timeout=step_timeout)
+        page.wait_for_timeout(1500)
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=10000)
+        except Exception:
+            pass
+
     # 2. Identify Password field
     pass_loc = None
-    custom_pass = action_params.get("password_locator")
     if custom_pass:
         pass_loc = resolve_locator_safely(page, action_params.get("password_locator_type"), custom_pass, role_hint="textbox")
     else:
         pass_attempts = [
+            lambda: page.locator('[id="idcs-signin-basic-signin-form-password|input"]').first,
+            lambda: page.locator("input[id*='signin-form-password']").first,
             lambda: page.get_by_role("textbox", name="Password"),
             lambda: page.get_by_label(re.compile("password", re.I)),
             lambda: page.locator("input[type='password']").first,
-            lambda: page.locator("input[id*='signin-form-password']").first,
             lambda: page.locator("#P9999_PASSWORD").first,
             lambda: page.locator("#password").first,
             lambda: page.locator("input[name='password']").first,
@@ -625,7 +686,15 @@ def handle_login(
     if not pass_loc:
         raise ValueError("Could not automatically locate the Password field. Please specify a password locator in the action settings.")
 
-    # 3. Identify Submit button
+    # Fill password
+    log("Entering encrypted vault password into password field...")
+    try:
+        pass_loc.wait_for(state="visible", timeout=step_timeout)
+    except Exception:
+        pass
+    pass_loc.fill(pass_val, timeout=step_timeout)
+
+    # 3. Identify Submit / Sign In button
     btn_loc = None
     custom_btn = action_params.get("submit_locator")
     if custom_btn:
@@ -637,9 +706,8 @@ def handle_login(
             lambda: page.get_by_role("button", name="Sign in"),
             lambda: page.get_by_role("button", name="Log In"),
             lambda: page.get_by_role("button", name="Login"),
-            lambda: page.get_by_role("button", name="Next"),
             lambda: page.locator("button:has-text('Sign In')").first,
-            lambda: page.locator("button:has-text('Next')").first,
+            lambda: page.locator("button:has-text('Sign in')").first,
             lambda: page.locator("button[type='submit']").first,
             lambda: page.locator("input[type='submit']").first,
             lambda: page.locator("#B9999_LOGIN").first,
@@ -656,27 +724,118 @@ def handle_login(
     if not btn_loc:
         raise ValueError("Could not automatically locate the Login/Submit button. Please specify a submit button locator in the action settings.")
 
-    log(f"Entering username for account '{user_val}' into login form...")
-    user_loc.fill(user_val, timeout=step_timeout)
-
-    log("Entering encrypted vault password into password field...")
-    pass_loc.fill(pass_val, timeout=step_timeout)
-
     log("Submitting login form...")
-    btn_loc.click(timeout=step_timeout)
+    try:
+        # Check for inner native button if btn_loc is a web component wrapper
+        inner_btn = btn_loc.locator("button, input[type='submit']").first
+        if inner_btn.count() > 0 and inner_btn.is_visible():
+            inner_btn.click(timeout=step_timeout)
+        else:
+            btn_loc.click(timeout=step_timeout)
+    except Exception as exc:
+        log(f"Direct button click notice: {exc}. Attempting force-click or Enter key...")
+        try:
+            btn_loc.click(force=True, timeout=5000)
+        except Exception:
+            pass
+
+    # Resilient submit trigger: Also press Enter on the password field to guarantee form submission
+    try:
+        page.wait_for_timeout(800)
+        if "/signin" in page.url.lower() or "idcs" in page.url.lower() or page.locator("input[type='password']").count() > 0:
+            pass_loc.press("Enter")
+    except Exception:
+        pass
 
     # Allow post-login transitions, redirects, and async tree widgets to fully settle
-    try:
-        page.wait_for_load_state("load", timeout=15000)
-    except Exception:
-        pass
-    try:
-        page.wait_for_load_state("networkidle", timeout=5000)
-    except Exception:
-        pass
-    page.wait_for_timeout(2500)
+    log("Waiting for post-login page load, transitions, and authentication redirects...")
 
-    # Auto-expand navigation drawer if collapsed (e.g. Oracle APEX, modern SPAs) so menu links are available
+    # A. Wait for URL redirect away from login page / identity provider domain
+    initial_login_url = page.url
+    try:
+        page.wait_for_function(
+            """(initUrl) => {
+                const cur = window.location.href;
+                // If URL changed away from login/signin/idcs host/path, redirect is underway
+                const isStillLoginUrl = cur === initUrl || cur.includes('/signin') || cur.includes('/login') || cur.includes('identity.oraclecloud.com/ui');
+                if (!isStillLoginUrl) return true;
+
+                // Or if password input and submit buttons are gone from the page
+                const passEl = document.querySelector('input[type="password"]');
+                const submitEl = document.querySelector('#idcs-signin-basic-signin-form-submit, button[type="submit"]');
+                if (!passEl && !submitEl) return true;
+
+                // If error alert is displayed, return true immediately so error check can report it
+                const errAlert = document.querySelector('.oj-message-error, .oj-message-detail, [role="alert"], .alert-danger, .error-msg');
+                if (errAlert && errAlert.offsetParent !== null) return true;
+
+                return false;
+            }""",
+            arg=initial_login_url,
+            timeout=35000,
+        )
+    except Exception as exc:
+        log(f"Login redirect transition note: {exc}")
+
+    # B. Check if login failed with error message on page (e.g. invalid credentials)
+    try:
+        err_msg = page.evaluate("""() => {
+            const errEl = document.querySelector('.oj-message-error, .oj-message-detail, [role="alert"], .alert-danger, .error-msg, .app-alert');
+            if (errEl && errEl.offsetParent !== null) {
+                const txt = errEl.innerText || errEl.textContent || '';
+                return txt.trim();
+            }
+            return null;
+        }""")
+        if err_msg and any(w in err_msg.lower() for w in ("invalid", "incorrect", "denied", "failed", "unsuccessful")):
+            raise ValueError(f"Login authentication failed: {err_msg}")
+    except ValueError:
+        raise
+    except Exception:
+        pass
+
+    # C. High-speed destination page load (skip slow networkidle to save 20+ seconds)
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=12000)
+    except Exception:
+        pass
+    try:
+        page.wait_for_load_state("load", timeout=3000)
+    except Exception:
+        pass
+
+    # D. Quick check for loading overlays (fast 2.5s poll)
+    spinners = [
+        ".oj-progress-circle",
+        ".loading-overlay",
+        ".splash-screen",
+        "#loading-spinner",
+        ".p_spinner",
+        ".loading",
+        "[aria-busy='true']",
+        ".fuse-loading",
+        ".svg-spinner",
+    ]
+    for spin_sel in spinners:
+        try:
+            spin = page.locator(spin_sel).first
+            if spin.count() > 0 and spin.is_visible():
+                spin.wait_for(state="hidden", timeout=2500)
+        except Exception:
+            pass
+
+    # E. Video footage & landing page settle delay:
+    user_wait = action_params.get("wait_after_ms")
+    if user_wait is not None and int(user_wait) > 0:
+        post_login_duration = int(user_wait)
+    else:
+        # 1200ms gives video recording multiple crisp post-login frames without slowing test down
+        post_login_duration = 1200 if capture_video else 400
+    if post_login_duration > 0:
+        log(f"Post-login framework stabilization ({post_login_duration}ms)...")
+        page.wait_for_timeout(post_login_duration)
+
+    # F. Auto-expand navigation drawer if collapsed (e.g. Oracle APEX, modern SPAs) so menu links are available
     ensure_navigation_expanded(page, log=log)
 
     # Optional post-login verification condition
@@ -710,22 +869,27 @@ def handle_navigate(
     raw_target = action_params.get("path") or action_params.get("url") or action_params.get("target") or locator_val or ""
     raw_target = raw_target.strip()
 
+    is_explicit_click = nav_method == "click" or locator_type in ("id", "css", "xpath", "name", "role", "label", "text", "testid")
     is_path = (
-        nav_method == "path"
-        or raw_target.startswith(("/", "http://", "https://", "./", "../"))
-        or "?" in raw_target
-        or raw_target.endswith((".html", ".jsp", ".aspx", ".php"))
+        not is_explicit_click
+        and (
+            nav_method == "path"
+            or raw_target.startswith(("/", "http://", "https://", "./", "../"))
+            or "?" in raw_target
+            or raw_target.endswith((".html", ".jsp", ".aspx", ".php"))
+        )
     )
 
-    if not is_path and (nav_method == "click" or raw_target):
-        log(f"Navigating by clicking UI link/menu item '{raw_target}'...")
+    if not is_path:
+        target_name = action_params.get("element_friendly_name") or raw_target
+        log(f"Navigating by clicking UI link/menu item '{target_name}' (locator: {locator_type or 'smart'}={raw_target})...")
         robust_click(page, locator_type, raw_target, role_hint="link", timeout=step_timeout, log=log)
         try:
-            page.wait_for_load_state("domcontentloaded", timeout=min(step_timeout, 5000))
+            page.wait_for_load_state("domcontentloaded", timeout=min(step_timeout, 8000))
         except Exception:
             pass
-        page.wait_for_timeout(400)
-        return f"Navigated to '{raw_target}'", raw_target
+        page.wait_for_timeout(600)
+        return f"Navigated to '{target_name}'", raw_target
     else:
         clean_base = normalize_app_url(base_url) if base_url else ""
         path = raw_target or "/"
@@ -940,8 +1104,8 @@ def run_generic_scenario(
     project_ext_id = project["external_id"]
     run_id_str = str(run_uuid)
     base_url = normalize_app_url((project.get("base_url") or "").rstrip("/"))
-    browser_name = project.get("browser", "chromium").lower()
-    is_headless = project.get("headless", True)
+    browser_name = (scenario.get("browser") or project.get("browser", "chromium")).lower()
+    is_headless = scenario.get("headless") if scenario.get("headless") is not None else project.get("headless", True)
     capture_screenshots = project.get("capture_screenshots", True)
     capture_video = project.get("capture_video", False)
     default_step_timeout_ms = (project.get("test_timeout_seconds") or 30) * 1000
@@ -1026,10 +1190,19 @@ def run_generic_scenario(
             "--no-sandbox",
             "--disable-setuid-sandbox",
         ]
+        if not is_headless:
+            launch_args.extend([
+                "--start-maximized",
+                "--window-position=50,50",
+                "--window-size=1440,900",
+            ])
         launch_kwargs: dict[str, Any] = {
             "headless": is_headless,
             "args": launch_args,
         }
+        if not is_headless:
+            # Subtle slow_mo when live mode is active so human eye can follow actions live
+            launch_kwargs["slow_mo"] = 60
         if browser_name == "chromium":
             try:
                 browser: Browser = browser_type.launch(**launch_kwargs, channel="chrome")
@@ -1054,6 +1227,11 @@ def run_generic_scenario(
 
         context: BrowserContext = browser.new_context(**context_kwargs)
         page: Page = context.new_page()
+        if not is_headless:
+            try:
+                page.bring_to_front()
+            except Exception:
+                pass
 
         active_browser_sessions[run_id_str] = {
             "browser": browser,
@@ -1301,6 +1479,13 @@ def run_generic_scenario(
                 log(f"[PASSED] Step {step_order} finished in {t_duration_ms}ms")
             else:
                 failed_count += 1
+
+        # Guarantee final video frames are captured before browser teardown
+        if capture_video:
+            try:
+                page.wait_for_timeout(600)
+            except Exception:
+                pass
 
         # Teardown browser
         try:

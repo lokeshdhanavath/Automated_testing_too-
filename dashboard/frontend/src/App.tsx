@@ -624,15 +624,62 @@ async function loadTests(projectId?: string) {
     setCsvLoading(true);
     try {
       const header = (await file.slice(0, 4096).text()).split(/\r?\n/, 1)[0].toLowerCase();
-      if (header.includes("action") && header.includes("element")) {
+      const isActionCsv =
+        header.includes("action") ||
+        header.includes("which action") ||
+        header.includes("target element") ||
+        (!header.includes("tc_id") && (header.includes("element") || header.includes("target") || header.includes("click") || header.includes("fill")));
+
+      if (isActionCsv) {
         const parsed = await parseWorkflowCsv(file, activeProjectId);
         setRegistryCsvMode(true);
         setRegistryCsvSteps(parsed.steps);
-        const stepRow = { TC_ID: "registry-workflow", Scenario: file.name, Preconditions: "", Steps: `${parsed.steps.length} resolved action step(s)`, Expected_Result: "Workflow steps complete", Priority: "MEDIUM", valid: true };
-        setCsvValidation({valid:true,filename:file.name,total_rows:1,valid_rows:1,columns:["step","url","element","action","value","wait_ms","on_fail"],scenarios:[stepRow]});
-        setSelectedScenarioIds(["registry-workflow"]);
-        setCsvMessage(`CSV parsed: ${parsed.steps.length} step(s), registry elements resolved.`);
-        addLog(`Registry workflow CSV parsed for ${file.name}.`);
+
+        const scenarios = (parsed.steps || []).map((s: any, idx: number) => {
+          const params = s.action_params || {};
+          const matchedName = params.element_friendly_name || s.locator_value || "";
+          const origTarget = params.original_target_input || "";
+          const conf = params.match_confidence;
+          const val = params.value || "";
+          const stepOrder = s.step_order || (idx + 1);
+
+          let stepDesc = `${s.action_type.replace('_', ' ').toUpperCase()} on "${matchedName || origTarget}"`;
+          if (params.matched_from_catalog && conf) {
+            stepDesc += ` [Catalog: ${Math.round(conf * 100)}% match]`;
+          }
+          if (val) {
+            stepDesc += ` [Data: "${val}"]`;
+          }
+
+          return {
+            TC_ID: `STEP-${String(stepOrder).padStart(3, "0")}`,
+            Scenario: s.description || `Execute ${s.action_type}`,
+            Preconditions: s.action_type === "login" ? "Vault credentials" : (s.action_type === "open_app" ? "Browser available" : ""),
+            Steps: stepDesc,
+            Expected_Result: "Action executes successfully",
+            Priority: "HIGH",
+            valid: true,
+            mapped: true,
+            action_type: s.action_type,
+            target_element: matchedName,
+            original_target: origTarget,
+            matched_catalog: params.matched_from_catalog,
+            match_confidence: conf,
+            input_data: val,
+          };
+        });
+
+        setCsvValidation({
+          valid: true,
+          filename: file.name,
+          total_rows: scenarios.length,
+          valid_rows: scenarios.length,
+          columns: ["Step", "Action", "Target Element", "Nearby Catalog Match", "Input Data", "Status"],
+          scenarios: scenarios,
+        });
+        setSelectedScenarioIds(scenarios.map((s) => s.TC_ID));
+        setCsvMessage(`CSV parsed: ${parsed.steps.length} action step(s). ${parsed.resolved_catalog_elements ?? 0} element(s) matched from catalog.`);
+        addLog(`Action workflow CSV parsed for ${file.name}: ${parsed.steps.length} step(s).`);
         return;
       }
       setRegistryCsvMode(false);
@@ -704,7 +751,14 @@ async function loadTests(projectId?: string) {
     );
 
     try {
-      const response = await startRun({ project_id: activeProjectId, test_ids: selected });
+      const response = await startRun({
+        project_id: activeProjectId,
+        test_ids: selected,
+        headless,
+        browser: browser.toLowerCase(),
+        environment,
+        capture_screenshots: capture,
+      });
       setActiveRunId(response.run_id);
       setRunStatus(response.status);
       addLog(`Run ID: ${response.run_id}`);
@@ -1501,6 +1555,17 @@ async function loadTests(projectId?: string) {
                     {csvExecuting ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
                     {csvExecuting ? "Starting…" : `Run selected (${selectedScenarioIds.length})`}
                   </button>
+                  {registryCsvMode && (
+                    <button
+                      className="button button-secondary"
+                      onClick={() => setPage("Workflow Studio")}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, borderColor: "var(--v-accent)", color: "var(--v-accent)" }}
+                      title="Open in Workflow Studio to view, edit, or configure steps visually"
+                    >
+                      <Layers size={16} />
+                      Open in Workflow Studio
+                    </button>
+                  )}
                 </div>
                 {csvError && <div className="csv-message error"><CircleAlert size={16} />{csvError}</div>}
                 {csvMessage && <div className="csv-message success"><CheckCircle2 size={16} />{csvMessage}</div>}
@@ -1586,14 +1651,23 @@ async function loadTests(projectId?: string) {
                       </select>
                     </label>
 
-                    <label className="toggle-line">
-                      <input
-                        type="checkbox"
-                        checked={headless}
-                        onChange={(event) => setHeadless(event.target.checked)}
-                      />
-                      Headless mode
-                    </label>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px", background: "var(--v-surface-2)", borderRadius: 8, border: "1px solid var(--v-border)" }}>
+                      <label className="toggle-line" style={{ margin: 0, fontWeight: 600 }}>
+                        <input
+                          type="checkbox"
+                          checked={headless}
+                          onChange={(event) => setHeadless(event.target.checked)}
+                        />
+                        <span>Headless mode</span>
+                      </label>
+                      <div style={{ fontSize: "0.76rem", color: headless ? "var(--v-text-secondary)" : "#16a34a", display: "flex", alignItems: "center", gap: 6, fontWeight: 500 }}>
+                        {headless ? (
+                          <><span>⚡ Fast Background Run</span> &bull; <span>No browser window</span></>
+                        ) : (
+                          <><span>🟢 Live Browser Mode</span> &bull; <span>Browser opens on screen to watch live!</span></>
+                        )}
+                      </div>
+                    </div>
 
                     <label className="toggle-line">
                       <input
@@ -1645,11 +1719,10 @@ async function loadTests(projectId?: string) {
                       </button>
                     )}
 
-                    <p className="muted-text">
-                      Note: browser, environment, headless, and screenshot
-                      controls are currently UI preferences. They are not
-                      passed to the runner by the existing API request.
-                    </p>
+                    <div style={{ marginTop: 8, fontSize: "0.74rem", color: "#16a34a", display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>✓</span>
+                      <span>Execution preferences & live browser flags are active.</span>
+                    </div>
                   </div>
                 </section>
 
@@ -1668,15 +1741,33 @@ async function loadTests(projectId?: string) {
                       </div>
                       <code className="run-id">{activeRunId}</code>
 
+                      {running && (
+                        <div className="vq-live-execution-banner">
+                          <div className={headless ? "vq-live-pulse-dot" : "vq-live-pulse-dot-green"} />
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                              {headless ? "Executing Playwright Automation (High-Speed Headless)..." : "Watching Live Browser Execution on Screen..."}
+                            </span>
+                            <span style={{ fontSize: "0.72rem", color: "var(--v-text-secondary)" }}>
+                              Continuously monitoring real-time browser actions and assertions
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="progress-label">
                         <span>{running ? "Execution active" : "Execution state"}</span>
-                        <span>{progress}%</span>
+                        <span>{running ? "In Progress" : `${progress}%`}</span>
                       </div>
-                      <div className="progress-track">
-                        <div
-                          className="progress-fill"
-                          style={{ width: `${progress}%` }}
-                        />
+                      <div className="progress-track" style={{ overflow: "hidden", position: "relative" }}>
+                        {running ? (
+                          <div className="vq-continuous-progress-bar" />
+                        ) : (
+                          <div
+                            className="progress-fill"
+                            style={{ width: `${progress}%` }}
+                          />
+                        )}
                       </div>
 
                       <div className="run-stat-grid">
@@ -1696,7 +1787,7 @@ async function loadTests(projectId?: string) {
                 </section>
               </div>
 
-              {activeRunId && stepResults.length > 0 && (
+              {activeRunId && (stepResults.length > 0 || running) && (
                 <ScenarioExecutionView
                   runId={activeRunId}
                   stepResults={stepResults}

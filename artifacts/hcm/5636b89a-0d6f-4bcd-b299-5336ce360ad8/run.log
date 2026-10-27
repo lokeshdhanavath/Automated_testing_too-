@@ -1,0 +1,53 @@
+[2026-10-27 18:49:13 UTC] Starting execution for: 'basic flow' (Run ID: 5636b89a-0d6f-4bcd-b299-5336ce360ad8)
+[2026-10-27 18:49:13 UTC] Target Application: 'HCM' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-27 18:49:13 UTC] Browser: chromium (Headless: True)
+[2026-10-27 18:49:13 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-27 18:49:15 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-27 18:49:15 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-27 18:49:24 UTC] [PASSED] Step 1 finished in 8852ms
+[2026-10-27 18:49:24 UTC] [RUNNING] Step 2: Login with application vault credentials (action: login)
+[2026-10-27 18:49:24 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-27 18:49:32 UTC] Entering encrypted vault password into password field...
+[2026-10-27 18:49:32 UTC] Submitting login form...
+[2026-10-27 18:50:03 UTC] Waiting for post-login page load, transitions, and authentication redirects...
+[2026-10-27 18:50:03 UTC] Waiting for post-login application page to load completely...
+[2026-10-27 18:50:03 UTC] Displaying authenticated post-login page in video stream (6000ms)...
+[2026-10-27 18:50:09 UTC] [PASSED] Step 2 finished in 45133ms
+[2026-10-27 18:50:09 UTC] [RUNNING] Step 3: Navigate to page path (action: navigate)
+[2026-10-27 18:50:09 UTC] Navigating by clicking UI link/menu item 'Oracle Logo Home link' (locator: id=pt1:_UIScil1u)...
+[2026-10-27 18:50:12 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"pt1:_UIScil1u\"]").first
+    - locator resolved to <a href="#" id="pt1:_UIScil1u" title="Oracle Logo Home" class="xn2 xko p_AFTextOnly" onclick="this.focus();return false;"></a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - performing click action
+    - click action done
+    - waiting for scheduled navigations to finish
+
+[2026-10-27 18:50:15 UTC] [PASSED] Step 3 finished in 5114ms
+[2026-10-27 18:50:15 UTC] [RUNNING] Step 4: Click element (action: click_element)
+[2026-10-27 18:50:15 UTC] Clicking element 'groupNode_workforce_management' (click)...
+[2026-10-27 18:50:18 UTC] [PASSED] Step 4 finished in 3577ms
+[2026-10-27 18:50:18 UTC] [RUNNING] Step 5: Click element (action: click_element)
+[2026-10-27 18:50:18 UTC] Clicking element 'itemNode_workforce_management_new_person' (click)...
+[2026-10-27 18:50:19 UTC] [PASSED] Step 5 finished in 436ms
+[2026-10-27 18:50:19 UTC] [RUNNING] Step 6: Click element (action: click_element)
+[2026-10-27 18:50:19 UTC] Clicking element 'Hire an Employee' (click)...
+[2026-10-27 18:50:19 UTC] [PASSED] Step 6 finished in 582ms
+[2026-10-27 18:50:19 UTC] [RUNNING] Step 7: Fill input field (action: fill_input)
+[2026-10-27 18:50:20 UTC] Filling input 'First Name' with value 'lokesh'...
+[2026-10-27 18:51:20 UTC] [ERROR] Step 7 failed: Locator.fill: Timeout 60000ms exceeded.
+Call log:
+  - waiting for get_by_label("First Name")
+
+[2026-10-27 18:51:20 UTC] Failure screenshot captured: failure_step_7.png
+[2026-10-27 18:51:20 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-27 18:51:20 UTC] [SKIPPED] Step 8: Fill input field
+[2026-10-27 18:51:20 UTC] [SKIPPED] Step 9: Fill input field
+[2026-10-27 18:51:34 UTC] Video saved and registered: recording.webm
+[2026-10-27 18:51:34 UTC] Workflow execution completed with status: FAILED
+[2026-10-27 18:51:34 UTC] Summary: 6/9 passed, 1 failed, 2 skipped.

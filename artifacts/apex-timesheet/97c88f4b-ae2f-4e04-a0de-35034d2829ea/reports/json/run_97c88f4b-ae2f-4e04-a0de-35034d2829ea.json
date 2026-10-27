@@ -1,0 +1,30 @@
+{
+  "run_id": "97c88f4b-ae2f-4e04-a0de-35034d2829ea",
+  "timestamp": "2026-10-27T21:01:53",
+  "environment": {
+    "python": "3.10.11",
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "run_id": "97c88f4b-ae2f-4e04-a0de-35034d2829ea",
+    "timestamp": "2026-10-27T21:01:53",
+    "browser": "chromium",
+    "headless": true,
+    "capture_screenshots": true,
+    "capture_video": true
+  },
+  "total": 1,
+  "passed": 1,
+  "failed": 0,
+  "skipped": 0,
+  "errors": 0,
+  "tests": [
+    {
+      "name": "tests/test_login.py::test_login_page_loads",
+      "status": "passed",
+      "duration": 3.67,
+      "error": "",
+      "screenshot": "/Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/artifacts/apex-timesheet/97c88f4b-ae2f-4e04-a0de-35034d2829ea/screenshots/test_login_page_loads.png",
+      "video": "/Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/artifacts/apex-timesheet/97c88f4b-ae2f-4e04-a0de-35034d2829ea/videos/page@96342bb2d8b9d22b6ae53354f128d938.webm",
+      "state_changing": false
+    }
+  ]
+}

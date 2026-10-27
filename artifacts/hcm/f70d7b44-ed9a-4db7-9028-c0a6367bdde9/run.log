@@ -1,0 +1,18 @@
+[2026-10-27 16:28:32 UTC] Starting execution for: 'basic flow' (Run ID: f70d7b44-ed9a-4db7-9028-c0a6367bdde9)
+[2026-10-27 16:28:32 UTC] Target Application: 'HCM' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-27 16:28:32 UTC] Browser: chromium (Headless: True)
+[2026-10-27 16:28:32 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-27 16:28:34 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-27 16:28:34 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-27 16:28:38 UTC] [PASSED] Step 1 finished in 3434ms
+[2026-10-27 16:28:38 UTC] [RUNNING] Step 2: Login with application vault credentials (action: login)
+[2026-10-27 16:28:38 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-27 16:28:38 UTC] [ERROR] Step 2 failed: Locator.fill: Unexpected token "|" while parsing css selector "#idcs-signin-basic-signin-form-username|input". Did you mean to CSS.escape it?
+Call log:
+  - waiting for #idcs-signin-basic-signin-form-username|input
+
+[2026-10-27 16:28:38 UTC] Failure screenshot captured: failure_step_2.png
+[2026-10-27 16:28:38 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-27 16:28:39 UTC] Video saved and registered: recording.webm
+[2026-10-27 16:28:39 UTC] Workflow execution completed with status: FAILED
+[2026-10-27 16:28:39 UTC] Summary: 1/2 passed, 1 failed, 0 skipped.

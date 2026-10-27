@@ -21,7 +21,12 @@ if sys.platform == "win32":
 else:
     VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 
-python_bin = str(VENV_PYTHON if VENV_PYTHON.is_file() else sys.executable)
+if VENV_PYTHON.is_file():
+    python_bin = str(VENV_PYTHON)
+elif Path("/Library/Frameworks/Python.framework/Versions/3.10/bin/python3").is_file():
+    python_bin = "/Library/Frameworks/Python.framework/Versions/3.10/bin/python3"
+else:
+    python_bin = sys.executable
 
 
 def main():

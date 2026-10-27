@@ -86,6 +86,8 @@ class ScenarioRunPayload(BaseModel):
     credential_id: str | None = None
     data_profile_id: str | None = None
     dataset_row_index: int | None = 0
+    headless: bool | None = None
+    browser: str | None = None
 
 
 class DynamicWorkflowPayload(BaseModel):
@@ -99,6 +101,8 @@ class DynamicWorkflowPayload(BaseModel):
     save_as_scenario: bool = False
     dataset_row: dict[str, Any] | None = None
     dataset_rows: list[dict[str, Any]] | None = None
+    headless: bool | None = None
+    browser: str | None = None
 
 
 class DataProfilePayload(BaseModel):
@@ -464,6 +468,16 @@ def trigger_scenario_run(scenario_id: str, payload: ScenarioRunPayload):
             }
             main_mod.active_run_id = run_id_str
 
+        # Apply runtime headless / browser overrides if specified
+        project = dict(project)
+        scenario = dict(scenario)
+        if payload.headless is not None:
+            project["headless"] = payload.headless
+            scenario["headless"] = payload.headless
+        if payload.browser:
+            project["browser"] = payload.browser
+            scenario["browser"] = payload.browser
+
         # Persist test run in DB
         db_service.create_test_run(
             db=db,
@@ -596,6 +610,13 @@ def trigger_dynamic_workflow_run(project_id: str, payload: DynamicWorkflowPayloa
             except Exception:
                 pass
 
+        # Apply runtime headless / browser overrides if specified
+        project = dict(project)
+        if payload.headless is not None:
+            project["headless"] = payload.headless
+        if payload.browser:
+            project["browser"] = payload.browser
+
         scenario_dict = {
             "id": str(scenario_uuid) if scenario_uuid else None,
             "name": payload.name,
@@ -603,6 +624,8 @@ def trigger_dynamic_workflow_run(project_id: str, payload: DynamicWorkflowPayloa
             "failure_policy": payload.failure_policy,
             "timeout_seconds": payload.timeout_seconds,
             "steps": steps_dicts,
+            "headless": payload.headless if payload.headless is not None else project.get("headless", True),
+            "browser": payload.browser or project.get("browser", "chromium"),
         }
 
         run_uuid = uuid.uuid4()

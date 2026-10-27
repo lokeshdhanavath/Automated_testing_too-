@@ -1,0 +1,2 @@
+name,status,duration,error,screenshot,video,state_changing
+tests/test_login.py::test_login_page_loads,passed,3.67,,/Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/artifacts/apex-timesheet/97c88f4b-ae2f-4e04-a0de-35034d2829ea/screenshots/test_login_page_loads.png,/Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/artifacts/apex-timesheet/97c88f4b-ae2f-4e04-a0de-35034d2829ea/videos/page@96342bb2d8b9d22b6ae53354f128d938.webm,False

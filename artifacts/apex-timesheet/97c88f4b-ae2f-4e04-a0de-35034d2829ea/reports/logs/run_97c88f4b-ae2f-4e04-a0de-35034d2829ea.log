@@ -1,0 +1,42 @@
+21:01:44 | INFO    | ============================================================
+21:01:44 | INFO    | Run ID: 97c88f4b-ae2f-4e04-a0de-35034d2829ea
+21:01:44 | INFO    | Starting timesheet test session
+21:01:44 | INFO    | ============================================================
+============================= test session starts ==============================
+platform darwin -- Python 3.10.11, pytest-9.1.1, pluggy-1.7.0 -- /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/.venv/bin/python
+cachedir: .pytest_cache
+metadata: {'Python': '3.10.11', 'Platform': 'macOS-26.5.1-arm64-arm-64bit', 'Packages': {'pytest': '9.1.1', 'pluggy': '1.7.0'}, 'Plugins': {'metadata': '3.1.1', 'html': '4.2.0', 'anyio': '4.8.0'}}
+rootdir: /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-
+configfile: pytest.ini
+plugins: metadata-3.1.1, html-4.2.0, anyio-4.8.0
+collecting ... collected 1 item
+
+tests/test_login.py::test_login_page_loads PASSED21:01:53 | INFO    | Reports written. Run ID: 97c88f4b-ae2f-4e04-a0de-35034d2829ea
+21:01:53 | INFO    | Log file: /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/reports/logs/run_97c88f4b-ae2f-4e04-a0de-35034d2829ea.log
+
+[reports] JSON : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/artifacts/apex-timesheet/97c88f4b-ae2f-4e04-a0de-35034d2829ea/reports/json/run_97c88f4b-ae2f-4e04-a0de-35034d2829ea.json
+[reports] CSV  : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/artifacts/apex-timesheet/97c88f4b-ae2f-4e04-a0de-35034d2829ea/reports/csv/run_97c88f4b-ae2f-4e04-a0de-35034d2829ea.csv
+[reports] HIST : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/history/runs.jsonl
+
+
+- generated xml file: /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/artifacts/apex-timesheet/97c88f4b-ae2f-4e04-a0de-35034d2829ea/reports/xml/97c88f4b-ae2f-4e04-a0de-35034d2829ea.xml -
+- Generated html report: file:///Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/reports/html/report.html -
+============================== 1 passed in 8.85s ===============================
+
+============================================================
+Timesheet Test Run — 20261027_210144
+============================================================
+Working dir : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-
+Command     : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/.venv/bin/python -m pytest tests/test_login.py::test_login_page_loads --junitxml /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/artifacts/apex-timesheet/97c88f4b-ae2f-4e04-a0de-35034d2829ea/reports/xml/97c88f4b-ae2f-4e04-a0de-35034d2829ea.xml
+
+
+============================================================
+Run finished — exit code 0
+============================================================
+HTML  : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/reports/html/report.html
+JSON  : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/reports/json
+CSV   : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/reports/csv
+LOG   : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/reports/logs
+VIDEO : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/videos
+SHOTS : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/screenshots
+HIST  : /Users/lokeshdhanavath/Downloads/apex/Automated_testing_too-/history/runs.jsonl
