@@ -1,0 +1,4 @@
+[2026-10-28 09:17:38 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 4fe8ed01-5e7d-44dd-bde4-906dceb30c9f)
+[2026-10-28 09:17:38 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 09:17:38 UTC] Browser: chromium (Headless: False)
+[2026-10-28 09:17:38 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}

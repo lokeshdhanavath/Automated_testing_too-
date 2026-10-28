@@ -1,0 +1,72 @@
+[2026-10-28 08:57:14 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 5e3bee38-704e-45ef-8ac3-afdc5bde74a9)
+[2026-10-28 08:57:14 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 08:57:14 UTC] Browser: chromium (Headless: False)
+[2026-10-28 08:57:14 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-28 08:57:16 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 08:57:16 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 08:57:19 UTC] [PASSED] Step 1 finished in 2789ms
+[2026-10-28 08:57:19 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-28 08:57:23 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-28 08:57:23 UTC] Entering encrypted vault password into password field...
+[2026-10-28 08:57:24 UTC] Submitting login form...
+[2026-10-28 08:57:55 UTC] Waiting for post-login page load, transitions, and authentication redirects...
+[2026-10-28 08:57:55 UTC] [PASSED] Step 2 finished in 35680ms
+[2026-10-28 08:57:55 UTC] [RUNNING] Step 3: Click element (action: click_element)
+[2026-10-28 08:57:55 UTC] Clicking element 'pt1:_UIScil1u' (click)...
+[2026-10-28 08:57:58 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"pt1:_UIScil1u\"]").first
+    - locator resolved to <a href="#" id="pt1:_UIScil1u" title="Oracle Logo Home" class="xn2 xko p_AFTextOnly" onclick="this.focus();return false;"></a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - performing click action
+    - click action done
+    - waiting for scheduled navigations to finish
+
+[2026-10-28 08:58:01 UTC] [PASSED] Step 3 finished in 6092ms
+[2026-10-28 08:58:01 UTC] [RUNNING] Step 4: Click element (action: click_element)
+[2026-10-28 08:58:01 UTC] Clicking element 'groupNode_workforce_management' (click)...
+[2026-10-28 08:58:02 UTC] [PASSED] Step 4 finished in 458ms
+[2026-10-28 08:58:02 UTC] [RUNNING] Step 5: Navigate to page path (action: navigate)
+[2026-10-28 08:58:02 UTC] Navigating by clicking UI link/menu item 'New Person' (locator: id=itemNode_workforce_management_new_person)...
+[2026-10-28 08:58:02 UTC] [PASSED] Step 5 finished in 308ms
+[2026-10-28 08:58:02 UTC] [RUNNING] Step 6: Click element (action: click_element)
+[2026-10-28 08:58:02 UTC] Clicking element 'itemNode_workforce_management_new_person' (click)...
+[2026-10-28 08:58:06 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"itemNode_workforce_management_new_person\"]").first
+    - locator resolved to <div index="0" page="undefined" type="subcluster" title="New Person" role="presentation" class="app-nav-item" targetframe="_blank" filmstrip="New Person" isdesturlexist="false" destinationurl="undefined" group="groupNode_workforce_management" id="itemNode_workforce_management_new_person">…</div>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+
+[2026-10-28 08:58:14 UTC] [ERROR] Step 6 failed: Locator.evaluate: Timeout 2000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"itemNode_workforce_management_new_person\"]").first
+
+[2026-10-28 08:58:15 UTC] Failure screenshot captured: failure_step_6.png
+[2026-10-28 08:58:15 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 7: Wait for element
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 8: Click element
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 9: Select dropdown option
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 10: Wait 3 seconds
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 11: Fill input field
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 12: Fill input field
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 13: Click element
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 14: Wait 3 seconds
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 15: Click element
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 16: Wait 3 seconds
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 17: Select dropdown option
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 18: Click element
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 19: Wait 3 seconds
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 20: Click element
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 21: Wait 3 seconds
+[2026-10-28 08:58:15 UTC] [SKIPPED] Step 22: Click element
+[2026-10-28 08:58:17 UTC] Video saved and registered: recording.webm
+[2026-10-28 08:58:17 UTC] Workflow execution completed with status: FAILED
+[2026-10-28 08:58:17 UTC] Summary: 5/22 passed, 1 failed, 16 skipped.

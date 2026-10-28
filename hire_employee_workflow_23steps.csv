@@ -1,0 +1,25 @@
+Action,Target,Value,Description
+open_app,,,Open application base URL
+login,,,Login with vault credentials
+click_element,pt1:_UIScil1u,,Click Oracle Logo / Navigator menu
+click_element,groupNode_workforce_management,,Click Workforce Management group
+click_element,itemNode_workforce_management_new_person,,Click New Person menu item
+wait,,3,Wait 3 seconds
+click_element,Hire an Employee,,Click Hire an Employee
+wait,,3,Wait 3 seconds
+select_option,Legal Employer,ABS India Legal Employer 01,Select Legal Employer
+wait,,3,Wait 3 seconds
+fill_input,Last Name,test_035,Enter Last Name
+fill_input,First Name,name,Enter First Name
+click_element,Next,,Click Next
+wait,,3,Wait 3 seconds
+click_element,Next,,Click Next
+wait,,3,Wait 3 seconds
+select_option,Business Unit,NK UK Business Unit,Select Business Unit
+click_element,Next,,Click Next
+wait,,3,Wait 3 seconds
+click_element,Next,,Click Next
+wait,,3,Wait 3 seconds
+click_element,Submit,,Click Submit
+wait,,3,Wait 3 seconds
+

@@ -19,7 +19,7 @@ from app.database import SessionLocal
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_DIR = ROOT / "config"
 REGISTRY_FILE = REGISTRY_DIR / "projects.json"
 _registry_lock = RLock()

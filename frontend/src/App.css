@@ -3422,3 +3422,22 @@ code, pre {
   background: linear-gradient(90deg, transparent, #2563eb, transparent);
   animation: vq-stream-flow 1.5s ease-in-out infinite;
 }
+
+.sb-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--v-text-muted);
+  padding: 4px 2px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.sb-drag-handle:hover {
+  color: var(--v-primary);
+  background: rgba(99, 102, 241, 0.12);
+}
+.sb-drag-handle:active {
+  cursor: grabbing;
+}

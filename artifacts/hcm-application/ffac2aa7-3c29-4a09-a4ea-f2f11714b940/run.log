@@ -1,0 +1,80 @@
+[2026-10-28 11:39:02 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: ffac2aa7-3c29-4a09-a4ea-f2f11714b940)
+[2026-10-28 11:39:02 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 11:39:02 UTC] Browser: chromium (Headless: False)
+[2026-10-28 11:39:02 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-28 11:39:03 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 11:39:04 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 11:39:09 UTC] [PASSED] Step 1 finished in 5123ms
+[2026-10-28 11:39:09 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-28 11:39:14 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-28 11:39:14 UTC] Entering encrypted vault password into password field...
+[2026-10-28 11:39:14 UTC] Submitting login form...
+[2026-10-28 11:39:45 UTC] Waiting for post-login page load...
+[2026-10-28 11:39:45 UTC] [PASSED] Step 2 finished in 35936ms
+[2026-10-28 11:39:45 UTC] [RUNNING] Step 3: Click Oracle Logo / Navigator menu (action: click_element)
+[2026-10-28 11:39:45 UTC] Clicking element 'pt1:_UIScil1u' (click)...
+[2026-10-28 11:39:48 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"pt1:_UIScil1u\"], [id$=\":pt1:_UIScil1u\"], [id$=\"_pt1:_UIScil1u\"], [id*=\"pt1:_UIScil1u\"]").filter(has_not=locator("#__veriqon_live_hud_host, #__veriqon_live_hud, [data-playwright-skip]")).first
+    - locator resolved to <a href="#" id="pt1:_UIScil1u" title="Oracle Logo Home" class="xn2 xko p_AFTextOnly" onclick="this.focus();return false;"></a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - performing click action
+    - click action done
+    - waiting for scheduled navigations to finish
+
+[2026-10-28 11:39:57 UTC] [PASSED] Step 3 finished in 11999ms
+[2026-10-28 11:39:57 UTC] [RUNNING] Step 4: Click Workforce Management group (action: click_element)
+[2026-10-28 11:40:01 UTC] Clicking element 'groupNode_workforce_management' (click)...
+[2026-10-28 11:40:03 UTC] Oracle ADF synchronized and glass pane cleared (1647ms).
+[2026-10-28 11:40:04 UTC] [PASSED] Step 4 finished in 2656ms
+[2026-10-28 11:40:04 UTC] [RUNNING] Step 5: Click New Person menu item (action: click_element)
+[2026-10-28 11:40:04 UTC] Clicking element 'itemNode_workforce_management_new_person' (click)...
+[2026-10-28 11:40:04 UTC] [DEBUG] Immediate locator check failed: Ambiguity detected: locator 'smart='itemNode_workforce_management_new_person'' matched 2 visible elements (out of 2 total matching elements). Please specify an accessible role/name, unique label, or more specific selector to avoid unintended actions.
+[2026-10-28 11:40:04 UTC] Successfully clicked 'itemNode_workforce_management_new_person' via fast interactive DOM resolver.
+[2026-10-28 11:40:07 UTC] Oracle ADF synchronized and glass pane cleared (2913ms).
+[2026-10-28 11:40:07 UTC] [PASSED] Step 5 finished in 3742ms
+[2026-10-28 11:40:07 UTC] [RUNNING] Step 6: Wait 3 seconds (action: wait)
+[2026-10-28 11:40:08 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 11:40:11 UTC] [PASSED] Step 6 finished in 3026ms
+[2026-10-28 11:40:11 UTC] [RUNNING] Step 7: Click Hire an Employee (action: click_element)
+[2026-10-28 11:40:11 UTC] Clicking element 'Hire an Employee' (click)...
+[2026-10-28 11:40:21 UTC] [PASSED] Step 7 finished in 10510ms
+[2026-10-28 11:40:21 UTC] [RUNNING] Step 8: Select Legal Employer (action: select_option)
+[2026-10-28 11:40:30 UTC] Handling custom dropdown / search-and-select for 'Legal Employer' with target option 'ABS India Legal Employer 01'...
+[2026-10-28 11:40:30 UTC] Clicking dropdown trigger 'Legal Employer' to expand menu...
+[2026-10-28 11:40:38 UTC] Selecting option 'ABS India Legal Employer 01' via keyboard Enter...
+[2026-10-28 11:40:39 UTC] [PASSED] Step 8 finished in 17147ms
+[2026-10-28 11:40:39 UTC] [RUNNING] Step 9: Wait 3 seconds (action: wait)
+[2026-10-28 11:40:39 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 11:40:42 UTC] [PASSED] Step 9 finished in 3007ms
+[2026-10-28 11:40:42 UTC] [RUNNING] Step 10: Enter Last Name (action: fill_input)
+[2026-10-28 11:40:42 UTC] Filling input 'Last Name' with value 'test_035'...
+[2026-10-28 11:40:42 UTC] [ERROR] Step 10 failed: Locator.fill: Error: Element is not an <input>, <textarea>, <select> or [contenteditable] and does not have a role allowing [aria-readonly]
+Call log:
+  - waiting for get_by_text("Last Name").filter(has_not=locator("#__veriqon_live_hud_host, #__veriqon_live_hud, [data-playwright-skip]")).filter(has_not=locator("#__veriqon_live_hud_host, #__veriqon_live_hud, [data-playwright-skip]"))
+    - locator resolved to <span>Step 10/22: Enter Last Name</span>
+    - fill("test_035")
+  - attempting fill action
+    - waiting for element to be visible, enabled and editable
+
+[2026-10-28 11:40:42 UTC] Failure screenshot captured: failure_step_10.png
+[2026-10-28 11:40:42 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 11: Enter First Name
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 12: Click Next
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 13: Wait 3 seconds
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 14: Click Next
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 15: Wait 3 seconds
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 16: Select Business Unit
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 17: Click Next
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 18: Wait 3 seconds
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 19: Click Next
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 20: Wait 3 seconds
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 21: Click Submit
+[2026-10-28 11:40:42 UTC] [SKIPPED] Step 22: Wait 3 seconds
+[2026-10-28 11:40:44 UTC] Video saved and registered: recording.webm
+[2026-10-28 11:40:44 UTC] Workflow execution completed with status: FAILED
+[2026-10-28 11:40:44 UTC] Summary: 9/22 passed, 1 failed, 12 skipped.

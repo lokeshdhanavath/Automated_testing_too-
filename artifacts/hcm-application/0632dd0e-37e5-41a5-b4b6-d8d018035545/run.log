@@ -1,0 +1,14 @@
+[2026-10-28 06:27:45 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 0632dd0e-37e5-41a5-b4b6-d8d018035545)
+[2026-10-28 06:27:45 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 06:27:45 UTC] Browser: chromium (Headless: True)
+[2026-10-28 06:27:45 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-28 06:27:46 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 06:27:46 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 06:27:50 UTC] [PASSED] Step 1 finished in 3467ms
+[2026-10-28 06:27:50 UTC] [RUNNING] Step 2: Login with application vault credentials (action: login)
+[2026-10-28 06:27:50 UTC] [ERROR] Step 2 failed: Cannot perform login: No credentials configured for this application in the database vault. Please configure credentials under the Credentials tab before running.
+[2026-10-28 06:27:53 UTC] Failure screenshot captured: failure_step_2.png
+[2026-10-28 06:27:53 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-28 06:27:55 UTC] Video saved and registered: recording.webm
+[2026-10-28 06:27:55 UTC] Workflow execution completed with status: FAILED
+[2026-10-28 06:27:55 UTC] Summary: 1/2 passed, 1 failed, 0 skipped.

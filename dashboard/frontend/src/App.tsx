@@ -136,7 +136,46 @@ const navigation: {
 ];
 
 export default function App() {
-  const [page, setPage] = useState<Page>("Applications");
+  const [page, setPage] = useState<Page>(() => {
+    try {
+      // 1. Check URL hash first for direct navigation and persistence across tab reloads
+      const rawHash = window.location.hash.replace("#/", "").replace("#", "").trim().toLowerCase();
+      const hashMap: Record<string, Page> = {
+        "overview": "Overview",
+        "applications": "Applications",
+        "workflow-studio": "Workflow Studio",
+        "workflows": "Workflow Studio",
+        "capture-page": "Capture Page",
+        "capture": "Capture Page",
+        "credentials": "Credentials",
+        "test-runs": "Test Runs",
+        "runs": "Test Runs",
+        "test-evidence": "Test Evidence",
+        "evidence": "Test Evidence",
+        "screenshots": "Screenshots & Recordings",
+        "recordings": "Screenshots & Recordings",
+      };
+      if (rawHash && hashMap[rawHash]) {
+        return hashMap[rawHash];
+      }
+      // 2. Fall back to localStorage
+      const savedPage = localStorage.getItem("veriqon_active_page");
+      if (savedPage && [
+        "Applications",
+        "Overview",
+        "Workflow Studio",
+        "Capture Page",
+        "Credentials",
+        "Test Runs",
+        "Test Evidence",
+        "Screenshots & Recordings"
+      ].includes(savedPage)) {
+        return savedPage as Page;
+      }
+    } catch {}
+    return "Overview";
+  });
+
   const [artifactTab, setArtifactTab] = useState<"Screenshots" | "Videos">("Screenshots");
   const [tests, setTests] = useState<TestCase[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -155,7 +194,13 @@ export default function App() {
 
   // Projects are persisted by FastAPI in a local JSON registry.
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState("apex-timesheet");
+  const [activeProjectId, setActiveProjectId] = useState<string>(() => {
+    try {
+      return localStorage.getItem("veriqon_active_project_id") || "apex-timesheet";
+    } catch {
+      return "apex-timesheet";
+    }
+  });
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectSaving, setProjectSaving] = useState(false);
   const [projectError, setProjectError] = useState("");
@@ -204,7 +249,7 @@ export default function App() {
 
   const [environment, setEnvironment] = useState("QA (Test)");
   const [browser, setBrowser] = useState("Chrome");
-  const [headless, setHeadless] = useState(true);
+  const [headless, setHeadless] = useState(false);
   const [capture, setCapture] = useState(false);
 
   function addLog(message: string) {
@@ -340,8 +385,14 @@ async function loadTests(projectId?: string) {
     try {
       const result = await getProjects();
       setProjects(result);
-      setActiveProjectId((current) => result.some((project) => project.id === current)
-        ? current : (result[0]?.id ?? "apex-timesheet"));
+      const savedProjectId = localStorage.getItem("veriqon_active_project_id");
+      setActiveProjectId((current) => {
+        if (savedProjectId && result.some((project) => project.id === savedProjectId)) {
+          return savedProjectId;
+        }
+        return result.some((project) => project.id === current)
+          ? current : (result[0]?.id ?? "apex-timesheet");
+      });
     } catch (error) {
       if (retryCount < 2) {
         setTimeout(() => void refreshProjects(retryCount + 1), 1200);
@@ -445,6 +496,68 @@ async function loadTests(projectId?: string) {
   useEffect(() => {
     void refreshProjects();
   }, []);
+
+  // Persist current active tab and sync URL hash so tab stays active across reloads and tab switches
+  useEffect(() => {
+    try {
+      localStorage.setItem("veriqon_active_page", page);
+      const pageToHash: Record<Page, string> = {
+        "Overview": "overview",
+        "Applications": "applications",
+        "Workflow Studio": "workflow-studio",
+        "Capture Page": "capture-page",
+        "Credentials": "credentials",
+        "Test Suites": "test-suites",
+        "CSV Scenarios": "csv-scenarios",
+        "Test Runs": "test-runs",
+        "Test Evidence": "test-evidence",
+        "Screenshots & Recordings": "recordings",
+        "Settings": "settings",
+      };
+      const hash = pageToHash[page];
+      if (hash && window.location.hash !== `#/${hash}`) {
+        window.history.replaceState(null, "", `#/${hash}`);
+      }
+    } catch {}
+  }, [page]);
+
+  // Handle browser back/forward buttons or hash change
+  useEffect(() => {
+    const onHashChange = () => {
+      try {
+        const rawHash = window.location.hash.replace("#/", "").replace("#", "").trim().toLowerCase();
+        const hashMap: Record<string, Page> = {
+          "overview": "Overview",
+          "applications": "Applications",
+          "workflow-studio": "Workflow Studio",
+          "workflows": "Workflow Studio",
+          "capture-page": "Capture Page",
+          "capture": "Capture Page",
+          "credentials": "Credentials",
+          "test-runs": "Test Runs",
+          "runs": "Test Runs",
+          "test-evidence": "Test Evidence",
+          "evidence": "Test Evidence",
+          "screenshots": "Screenshots & Recordings",
+          "recordings": "Screenshots & Recordings",
+        };
+        if (rawHash && hashMap[rawHash]) {
+          setPage(hashMap[rawHash]);
+        }
+      } catch {}
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  // Persist active project selection
+  useEffect(() => {
+    try {
+      if (activeProjectId) {
+        localStorage.setItem("veriqon_active_project_id", activeProjectId);
+      }
+    } catch {}
+  }, [activeProjectId]);
 
   useEffect(() => {
     if (activeProjectId) {
@@ -1651,20 +1764,59 @@ async function loadTests(projectId?: string) {
                       </select>
                     </label>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px", background: "var(--v-surface-2)", borderRadius: 8, border: "1px solid var(--v-border)" }}>
-                      <label className="toggle-line" style={{ margin: 0, fontWeight: 600 }}>
-                        <input
-                          type="checkbox"
-                          checked={headless}
-                          onChange={(event) => setHeadless(event.target.checked)}
-                        />
-                        <span>Headless mode</span>
-                      </label>
-                      <div style={{ fontSize: "0.76rem", color: headless ? "var(--v-text-secondary)" : "#16a34a", display: "flex", alignItems: "center", gap: 6, fontWeight: 500 }}>
-                        {headless ? (
-                          <><span>⚡ Fast Background Run</span> &bull; <span>No browser window</span></>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--v-text-secondary)" }}>Execution Mode</span>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => setHeadless(false)}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            fontSize: "0.8rem",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                            transition: "all 0.15s ease",
+                            background: !headless ? "rgba(16, 185, 129, 0.12)" : "var(--v-surface-2)",
+                            color: !headless ? "#059669" : "var(--v-text-secondary)",
+                            border: !headless ? "1.5px solid #10b981" : "1px solid var(--v-border)",
+                            boxShadow: !headless ? "0 2px 8px rgba(16, 185, 129, 0.15)" : "none",
+                          }}
+                        >
+                          <span>👁️ Watch Live</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHeadless(true)}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            fontSize: "0.8rem",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                            transition: "all 0.15s ease",
+                            background: headless ? "rgba(99, 102, 241, 0.12)" : "var(--v-surface-2)",
+                            color: headless ? "#6366f1" : "var(--v-text-secondary)",
+                            border: headless ? "1.5px solid #6366f1" : "1px solid var(--v-border)",
+                            boxShadow: headless ? "0 2px 8px rgba(99, 102, 241, 0.15)" : "none",
+                          }}
+                        >
+                          <span>⚡ Headless</span>
+                        </button>
+                      </div>
+                      <div style={{ fontSize: "0.75rem", color: !headless ? "#059669" : "var(--v-text-secondary)", fontWeight: 500, marginTop: 2 }}>
+                        {!headless ? (
+                          <span>🟢 Browser window pops up on your Windows desktop so you can watch actions live.</span>
                         ) : (
-                          <><span>🟢 Live Browser Mode</span> &bull; <span>Browser opens on screen to watch live!</span></>
+                          <span>⚡ Fast background execution without visible browser window.</span>
                         )}
                       </div>
                     </div>
@@ -2185,14 +2337,51 @@ async function loadTests(projectId?: string) {
                     </select>
                   </label>
 
-                  <label className="toggle-line">
-                    <input
-                      type="checkbox"
-                      checked={headless}
-                      onChange={(event) => setHeadless(event.target.checked)}
-                    />
-                    Headless mode
-                  </label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--v-text-secondary)" }}>Execution Mode</span>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setHeadless(false)}
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          background: !headless ? "rgba(16, 185, 129, 0.12)" : "var(--v-surface-2)",
+                          color: !headless ? "#059669" : "var(--v-text-secondary)",
+                          border: !headless ? "1.5px solid #10b981" : "1px solid var(--v-border)",
+                        }}
+                      >
+                        <span>👁️ Watch Live</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHeadless(true)}
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          background: headless ? "rgba(99, 102, 241, 0.12)" : "var(--v-surface-2)",
+                          color: headless ? "#6366f1" : "var(--v-text-secondary)",
+                          border: headless ? "1.5px solid #6366f1" : "1px solid var(--v-border)",
+                        }}
+                      >
+                        <span>⚡ Headless</span>
+                      </button>
+                    </div>
+                  </div>
 
                   <label className="toggle-line">
                     <input

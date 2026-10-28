@@ -1,0 +1,15 @@
+[2026-10-28 07:33:50 UTC] Starting execution for: 'Wait Action Integration Test' (Run ID: fdd86fa0-f77d-4ebe-a0a2-9983e7b27412)
+[2026-10-28 07:33:50 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-28 07:33:50 UTC] Browser: chromium (Headless: False)
+[2026-10-28 07:33:51 UTC] [RUNNING] Step 1: Open Test Page (action: navigate)
+[2026-10-28 07:33:51 UTC] Navigating to page path: file:///C:/Users/LOKESH~1.DHA/AppData/Local/Temp/tmp4l0zqjk7.html
+[2026-10-28 07:33:51 UTC] [PASSED] Step 1 finished in 204ms
+[2026-10-28 07:33:51 UTC] [RUNNING] Step 2: Wait 1.5 seconds (action: wait)
+[2026-10-28 07:33:51 UTC] Pausing execution for 1.5s (1500ms)...
+[2026-10-28 07:33:53 UTC] [PASSED] Step 2 finished in 1634ms
+[2026-10-28 07:33:53 UTC] [RUNNING] Step 3: Assert Title (action: assert_title)
+[2026-10-28 07:33:53 UTC] Executing verification: type='page_title', target='', expected='Wait Test Page'
+[2026-10-28 07:33:53 UTC] [PASSED] Step 3 finished in 3ms
+[2026-10-28 07:33:56 UTC] Video saved and registered: recording.webm
+[2026-10-28 07:33:56 UTC] Workflow execution completed with status: PASSED
+[2026-10-28 07:33:56 UTC] Summary: 3/3 passed, 0 failed, 0 skipped.

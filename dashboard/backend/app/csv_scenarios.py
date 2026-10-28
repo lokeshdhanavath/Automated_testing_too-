@@ -57,6 +57,9 @@ ACTION_MAP = {
     "select": "select_option",
     "select_option": "select_option",
     "choose": "select_option",
+    "search_and_select": "select_option",
+    "search_select": "select_option",
+    "combobox": "select_option",
     "verify": "verify_element",
     "verify_visible": "verify_element",
     "verify_contains": "verify_element",
@@ -64,10 +67,13 @@ ACTION_MAP = {
     "verify_element": "verify_element",
     "assert": "verify_element",
     "assert_visible": "verify_element",
-    "wait": "wait_for_element",
+    "wait": "wait",
+    "pause": "wait",
+    "sleep": "wait",
+    "delay": "wait",
+    "wait_timeout": "wait",
+    "wait_for_timeout": "wait",
     "wait_for_element": "wait_for_element",
-    "wait_timeout": "wait_for_element",
-    "sleep": "wait_for_element",
     "press_key": "press_key",
     "key": "press_key",
     "check": "check",
@@ -273,6 +279,23 @@ def load_project_catalog_elements(db: Session, project_uuid: uuid.UUID) -> list[
     return catalog
 
 
+def extract_wait_seconds(raw_text: str | None) -> float | None:
+    """Extract wait duration in seconds from flexible formats (e.g. 5, '5s', '3000ms', '2.5 sec')."""
+    if not raw_text:
+        return None
+    s = str(raw_text).strip().lower()
+    ms_match = re.search(r"(\d+(?:\.\d+)?)\s*ms", s)
+    if ms_match:
+        return float(ms_match.group(1)) / 1000.0
+    sec_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:s|sec|secs|second|seconds)?", s)
+    if sec_match:
+        val = float(sec_match.group(1))
+        if val >= 100 and "s" not in s:
+            return val / 1000.0
+        return val
+    return None
+
+
 def parse_csv_to_steps(csv_text: str, project_id: str, db: Session) -> list[dict[str, Any]]:
     """
     Parse action-based CSV workflows with flexible column headers and
@@ -299,7 +322,26 @@ def parse_csv_to_steps(csv_text: str, project_id: str, db: Session) -> list[dict
         ["input_data", "input data", "filling_input_data", "filling input data", "value", "input", "data", "text", "val", "test_data", "parameter", "content"],
     )
     col_url = find_matching_header(headers, ["url", "link", "address", "page_url", "target_url"])
-    col_wait = find_matching_header(headers, ["wait_ms", "wait", "delay", "delay_ms", "sleep"])
+    col_wait = find_matching_header(
+        headers,
+        [
+            "wait_after",
+            "wait_after_s",
+            "wait_after_seconds",
+            "wait_after_sec",
+            "wait_after_ms",
+            "wait_s",
+            "wait_sec",
+            "wait",
+            "delay",
+            "delay_ms",
+            "delay_s",
+            "sleep",
+            "pause",
+            "wait_duration",
+            "wait_seconds",
+        ],
+    )
     col_fail = find_matching_header(headers, ["on_fail", "onfail", "policy", "error_handling"])
     col_desc = find_matching_header(headers, ["description", "desc", "comment", "notes", "scenario", "name"])
 
@@ -328,6 +370,13 @@ def parse_csv_to_steps(csv_text: str, project_id: str, db: Session) -> list[dict
 
         clean_act = re.sub(r"[^a-z0-9_]", "", raw_act.replace(" ", "_").replace("-", "_"))
         action = ACTION_MAP.get(clean_act) or ACTION_MAP.get(raw_act)
+        wait_from_action_name = None
+        if not action:
+            for p in ("wait", "pause", "sleep", "delay"):
+                if raw_act.startswith(p):
+                    action = "wait"
+                    wait_from_action_name = extract_wait_seconds(raw_act)
+                    break
         if not action:
             raise ValueError(f"Row {idx}: Unknown action '{raw_act}'. Supported actions: {list(ACTION_MAP.keys())[:12]}...")
 
@@ -338,10 +387,8 @@ def parse_csv_to_steps(csv_text: str, project_id: str, db: Session) -> list[dict
         raw_fail = (row.get(col_fail) if col_fail else "") or "stop"
         raw_desc = (row.get(col_desc) if col_desc else "") or ""
 
-        try:
-            wait_ms = int(re.sub(r"[^\d]", "", raw_wait) or "0")
-        except ValueError:
-            wait_ms = 0
+        parsed_wait_sec = extract_wait_seconds(raw_wait)
+        wait_ms = int(parsed_wait_sec * 1000) if (parsed_wait_sec is not None and parsed_wait_sec > 0) else 0
 
         on_fail = raw_fail.lower()
         if on_fail not in {"stop", "continue"} and not on_fail.startswith("retry:"):
@@ -399,6 +446,36 @@ def parse_csv_to_steps(csv_text: str, project_id: str, db: Session) -> list[dict
                 "is_enabled": True,
                 "timeout_ms": None,
                 "description": description,
+            })
+            continue
+
+        # Special Action 3: Wait / Pause Execution
+        if action == "wait":
+            sec = (
+                extract_wait_seconds(raw_val)
+                or extract_wait_seconds(raw_target)
+                or wait_from_action_name
+                or (wait_ms / 1000.0 if wait_ms > 0 else None)
+                or 3.0
+            )
+            duration_ms = int(sec * 1000)
+            sec_display = int(sec) if sec == int(sec) else sec
+            desc = raw_desc or f"Wait {sec_display} second{'s' if sec_display != 1 else ''}"
+            steps.append({
+                "step_order": idx,
+                "action_type": "wait",
+                "locator_type": None,
+                "locator_value": "",
+                "action_params": {
+                    "seconds": sec,
+                    "duration_ms": duration_ms,
+                    "value": str(sec_display),
+                    "wait_after_ms": 0,
+                },
+                "on_fail": on_fail,
+                "is_enabled": True,
+                "timeout_ms": duration_ms + 10000,
+                "description": desc,
             })
             continue
 
@@ -468,6 +545,7 @@ def parse_csv_to_steps(csv_text: str, project_id: str, db: Session) -> list[dict
                     params.update({"verify_type": "visible" if not raw_val else "contains_text", "expected": raw_val})
             elif action == "select_option":
                 params["option"] = raw_val
+                params["value"] = raw_val
 
             friendly_label = params.get("element_friendly_name") or raw_target
             description = raw_desc or f"Step {idx}: {action.replace('_', ' ').capitalize()} '{friendly_label}'"
@@ -568,6 +646,9 @@ async def validate_csv(
                         steps_desc += f" (Catalog: {int(conf * 100)}% match)"
                     if val:
                         steps_desc += f" [Value: {val}]"
+                    wait_ms_val = params.get("wait_after_ms", 0)
+                    if wait_ms_val > 0:
+                        steps_desc += f" [Wait: {round(wait_ms_val / 1000.0, 1)}s]"
 
                     scenarios.append({
                         "TC_ID": f"STEP-{s['step_order']:03d}",
@@ -585,6 +666,7 @@ async def validate_csv(
                         "match_confidence": conf,
                         "match_reason": params.get("match_reason", ""),
                         "input_data": val,
+                        "wait_after_ms": params.get("wait_after_ms", 0),
                     })
 
                 return {

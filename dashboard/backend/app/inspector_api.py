@@ -586,7 +586,7 @@ INPAGE_CAPTURE_DOCK_SCRIPT = """(() => {
                 position: fixed;
                 top: 18px;
                 right: 22px;
-                z-index: 2147483640;
+                z-index: 2147483647 !important; display: flex !important; visibility: visible !important; opacity: 1 !important;
                 background: rgba(15, 23, 42, 0.95);
                 backdrop-filter: blur(10px);
                 border: 1px solid rgba(56, 189, 248, 0.6);
@@ -1434,6 +1434,50 @@ PICKER_INJECTION_SCRIPT = INPAGE_CAPTURE_DOCK_SCRIPT
 # Background Proactor Worker Engine (isolated from Uvicorn SelectorEventLoop)
 # ---------------------------------------------------------------------------
 
+
+def bring_browser_to_front_windows(browser_type: str = "", page_title: str = ""):
+    """Brings the interactive Playwright browser window to the foreground on Windows desktop."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+
+        keywords = ["chrome", "chromium", "firefox", "edge", "webkit", "veriqon", "timesheet", "oracle"]
+        if browser_type:
+            keywords.append(browser_type.lower())
+        if page_title:
+            clean_t = page_title.strip().lower()
+            if len(clean_t) > 3:
+                keywords.append(clean_t[:25])
+
+        target_hwnds = []
+
+        def enum_cb(hwnd, _):
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    title = buff.value.lower()
+                    for kw in keywords:
+                        if kw in title:
+                            target_hwnds.append(hwnd)
+                            break
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+
+        for hwnd in target_hwnds:
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
+            if hasattr(user32, "SwitchToThisWindow"):
+                user32.SwitchToThisWindow(hwnd, True)
+            user32.SetForegroundWindow(hwnd)
+    except Exception as exc:
+        logger.debug(f"Failed to bring window to front: {exc}")
+
 class InspectorEngine:
     def __init__(self):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -1515,6 +1559,12 @@ class InspectorEngine:
                 "--disable-blink-features=AutomationControlled",
                 "--no-default-browser-check",
             ]
+            if sys.platform == "win32":
+                stealth_args.extend([
+                    "--start-maximized",
+                    "--window-position=50,50",
+                    "--window-size=1440,900",
+                ])
             if b_name in ("chrome", "google-chrome"):
                 try:
                     current_b = await self.pw.chromium.launch(
@@ -2221,12 +2271,30 @@ class InspectorEngine:
                     await session["page"].close()
                 except Exception:
                     pass
+                try:
+                    if session.get("context"):
+                        await session["context"].close()
+                except Exception:
+                    pass
+                old_b_type = session.get("browser_type")
+                if old_b_type and old_b_type in self.headed_browsers:
+                    try:
+                        old_b = self.headed_browsers.pop(old_b_type, None)
+                        if old_b and old_b.is_connected():
+                            await old_b.close()
+                    except Exception:
+                        pass
                 self.sessions.pop(project_id, None)
                 session = None
             else:
                 try:
+                    current_url = session["page"].url or ""
+                    if base_url and not current_url.startswith(base_url.rstrip("/")):
+                        await session["page"].goto(base_url, wait_until="commit", timeout=30000)
                     await session["page"].bring_to_front()
                     await session["page"].evaluate(dock_init)
+                    title = await session["page"].title()
+                    bring_browser_to_front_windows(browser_type, title)
                 except Exception:
                     pass
                 session["last_active"] = time.time()
@@ -2235,9 +2303,15 @@ class InspectorEngine:
         # Launch fresh context & page
         if visible:
             browser = await self.get_headed_browser(browser_type)
-            context_args = {"viewport": {"width": 1440, "height": 900}}
-            if browser_type in ("chromium", "chrome"):
-                context_args["user_agent"] = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+            if sys.platform == "win32" and browser_type in ("chromium", "chrome", "msedge", "edge"):
+                context_args = {"no_viewport": True}
+            else:
+                context_args = {"viewport": {"width": 1440, "height": 900}}
+            if browser_type in ("chromium", "chrome", "msedge", "edge"):
+                if sys.platform == "win32":
+                    context_args["user_agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+                else:
+                    context_args["user_agent"] = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
             context = await browser.new_context(**context_args)
             await context.add_init_script(dock_init)
 
@@ -2283,6 +2357,8 @@ class InspectorEngine:
             "project_id": project_id,
             "project_name": project_name,
             "page": page,
+            "context": context if visible else None,
+            "browser": browser if visible else None,
             "base_url": base_url,
             "browser_type": browser_type,
             "authenticated": False,
@@ -2320,6 +2396,12 @@ class InspectorEngine:
 
         session["authenticated"] = authenticated
         session["last_active"] = time.time()
+        if visible:
+            try:
+                title = await page.title()
+                bring_browser_to_front_windows(browser_type, title)
+            except Exception:
+                pass
         return await self.get_browser_status(project_id)
 
     async def navigate_browser(self, project_id: str, new_url: str) -> Dict[str, Any]:
@@ -2464,10 +2546,24 @@ class InspectorEngine:
         base_url: str,
         username: str = "",
         secret: str = "",
+        browser_type: str = "chromium",
     ) -> Dict[str, Any]:
         session = self._find_session(project_id)
         if not session or session["page"].is_closed():
-            raise RuntimeError("No active browser window is open. Please launch your browser first using 'Open in Browser'.")
+            logger.info(f"No active browser session for '{project_id}'; auto-launching browser in visible mode.")
+            await self.start_browser(
+                project_id=project_id,
+                project_name=project_name,
+                base_url=base_url,
+                username=username,
+                secret=secret,
+                with_login=True,
+                visible=True,
+                browser_type=browser_type,
+            )
+            session = self._find_session(project_id)
+            if not session or session["page"].is_closed():
+                raise RuntimeError("Failed to auto-launch browser session for capture.")
 
         page: Page = session["page"]
         session["last_active"] = time.time()
@@ -3163,6 +3259,7 @@ def capture_active_page(
         logger.warning(f"Could not retrieve credentials for capture: {exc}")
 
     try:
+        target_browser = (project.get("browser") or "chromium").lower()
         data = _inspector_engine.run_task(
             _inspector_engine.capture_current_page,
             project_id=project_id,
@@ -3170,6 +3267,7 @@ def capture_active_page(
             base_url=base_url,
             username=username,
             secret=secret,
+            browser_type=target_browser,
         )
     except Exception as exc:
         logger.error(f"Error capturing page for '{project_id}': {exc}", exc_info=True)

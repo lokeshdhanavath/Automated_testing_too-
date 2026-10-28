@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
@@ -28,8 +29,161 @@ from sqlalchemy.orm import Session
 from app import db_service
 from app import scenarios_service
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[3] if "dashboard" in Path(__file__).resolve().parts else Path(__file__).resolve().parents[2]
 ARTIFACTS_ROOT = PROJECT_ROOT / "artifacts"
+
+
+def bring_browser_to_front_windows(browser_type: str = "", page_title: str = ""):
+    """Brings the interactive Playwright browser window to the foreground on Windows desktop."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+
+        keywords = ["chrome", "chromium", "firefox", "edge", "msedge", "webkit", "veriqon", "timesheet", "oracle", "sign in", "hcm"]
+        if browser_type:
+            keywords.append(browser_type.lower())
+        if page_title:
+            clean_t = page_title.strip().lower()
+            if len(clean_t) > 3:
+                keywords.append(clean_t[:25])
+
+        target_hwnds = []
+
+        def enum_cb(hwnd, _):
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    title = buff.value.lower()
+                    for kw in keywords:
+                        if kw in title:
+                            target_hwnds.append(hwnd)
+                            break
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+
+        for hwnd in target_hwnds:
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
+            if hasattr(user32, "SwitchToThisWindow"):
+                user32.SwitchToThisWindow(hwnd, True)
+            user32.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+
+def update_live_browser_hud(page: Page, step_num: int, total_steps: int, action_name: str, desc: str, element_locator: Locator | None = None):
+    """
+    Renders an in-browser live progress HUD badge at top of the page so the user
+    can visually watch execution progress in real-time on screen.
+    Uses closed shadow DOM and data attributes so Playwright locators never pierce or match HUD text.
+    """
+    try:
+        clean_text = f"Step {step_num}/{total_steps}: {desc[:65]}"
+        js_code = """
+        (text) => {
+            // Remove legacy HUD elements if present
+            const old = document.getElementById('__veriqon_live_hud');
+            if (old) old.remove();
+
+            let host = document.getElementById('__veriqon_live_hud_host');
+            if (!host) {
+                host = document.createElement('div');
+                host.id = '__veriqon_live_hud_host';
+                host.setAttribute('aria-hidden', 'true');
+                host.setAttribute('data-playwright-skip', 'true');
+                host.style.cssText = 'all:initial;position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:2147483647;pointer-events:none;';
+                const shadow = host.attachShadow({ mode: 'open' });
+                const style = document.createElement('style');
+                style.textContent = `
+                    #hud_badge {
+                        background: rgba(15,23,42,0.94);
+                        color: #ffffff;
+                        padding: 8px 20px;
+                        border-radius: 9999px;
+                        font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+                        font-size: 13px;
+                        font-weight: 600;
+                        box-shadow: 0 8px 30px rgba(0,0,0,0.4),0 0 0 1px rgba(255,255,255,0.18);
+                        backdrop-filter: blur(8px);
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        pointer-events: none;
+                    }
+                    #hud_dot {
+                        display: inline-block;
+                        width: 9px;
+                        height: 9px;
+                        border-radius: 50%;
+                        background: #10b981;
+                        box-shadow: 0 0 10px #10b981;
+                        flex-shrink: 0;
+                    }
+                    #hud_text::after {
+                        content: attr(data-step-title);
+                        letter-spacing: 0.3px;
+                    }
+                `;
+                const badge = document.createElement('div');
+                badge.id = 'hud_badge';
+                const dot = document.createElement('span');
+                dot.id = 'hud_dot';
+                const txt = document.createElement('span');
+                txt.id = 'hud_text';
+                badge.appendChild(dot);
+                badge.appendChild(txt);
+                shadow.appendChild(style);
+                shadow.appendChild(badge);
+                document.documentElement.appendChild(host);
+            }
+            const txt = host.shadowRoot ? host.shadowRoot.getElementById('hud_text') : null;
+            if (txt) {
+                txt.setAttribute('data-step-title', text);
+            }
+        }
+        """
+        page.evaluate(js_code, clean_text)
+    except Exception:
+        pass
+
+
+def wait_for_oracle_adf_ready(page: Page, timeout_ms: int = 10000, log: Callable[[str], None] | None = None) -> None:
+    """
+    Ensures Oracle ADF partial page refresh (PPR) requests and blocking glass panes
+    (such as #_FOd1, .AFBlockingGlassPane) are fully dismissed before interacting with elements.
+    """
+    try:
+        is_adf = page.evaluate("() => typeof window.AdfPage !== 'undefined' && typeof window.AdfPage.PAGE !== 'undefined'")
+        if is_adf:
+            t0 = time.perf_counter()
+            page.wait_for_function(
+                "() => !window.AdfPage || !window.AdfPage.PAGE || window.AdfPage.PAGE.isSynchronizedWithServer()",
+                timeout=timeout_ms
+            )
+            page.wait_for_function(
+                """() => {
+                    const glasses = document.querySelectorAll('div[id*="_FOd1"], div.AFBlockingGlassPane, div[id*="glassPane"]');
+                    for (const g of glasses) {
+                        const style = window.getComputedStyle(g);
+                        if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0' && g.offsetParent !== null) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }""",
+                timeout=timeout_ms
+            )
+            elapsed = int((time.perf_counter() - t0) * 1000)
+            if elapsed > 150 and log:
+                log(f"Oracle ADF synchronized and glass pane cleared ({elapsed}ms).")
+    except Exception:
+        pass
 
 
 class AmbiguityError(Exception):
@@ -121,6 +275,13 @@ def check_ambiguity(loc: Locator, locator_desc: str) -> Locator:
       - If count == 1, returns that single visible element.
       - If count == 0, returns the original locator (so Playwright's timeout error will report appropriately).
     """
+    try:
+        # Exclude veriqon internal HUD / badges from matching
+        filtered = loc.filter(has_not=loc.page.locator("#__veriqon_live_hud_host, #__veriqon_live_hud, [data-playwright-skip]"))
+        if filtered.count() > 0:
+            loc = filtered
+    except Exception:
+        pass
     try:
         total = loc.count()
         if total > 1:
@@ -214,8 +375,8 @@ def resolve_locator_safely(
 
     # 7. Common HTML Attributes
     elif l_type == "id":
-        clean_id = l_val.lstrip("#").replace('\\', '\\\\').replace('"', '\\"')
-        raw_loc = page.locator(f'[id="{clean_id}"]')
+        clean_id = l_val.lstrip("#").replace(chr(92), chr(92)+chr(92)).replace(chr(34), chr(92)+chr(34))
+        raw_loc = page.locator(f'[id="{clean_id}"], [id$=":{clean_id}"], [id$="_{clean_id}"], [id*="{clean_id}"]')
         return check_ambiguity(raw_loc, desc)
     elif l_type == "name":
         raw_loc = page.locator(f"[name='{l_val}']")
@@ -301,20 +462,51 @@ def resolve_locator_safely(
         except Exception:
             pass
 
-        # Try Visible Text (exact and substring)
+        # Try Oracle ADF / Enterprise Form Field by Label (matches input/combobox in the same table row or next to label)
         try:
-            text_candidate = page.get_by_text(l_val, exact=True)
-            if text_candidate.count() > 0:
-                return check_ambiguity(text_candidate, desc)
+            adf_field_selectors = [
+                f"//tr[contains(., '{l_val}')]//input",
+                f"//tr[contains(., '{l_val}')]//*[@role='combobox']",
+                f"//tr[contains(., '{l_val}')]//select",
+                f"//label[contains(text(), '{l_val}')]/following::input[1]",
+                f"//td[contains(text(), '{l_val}')]/following::input[1]",
+                f"//label[contains(., '{l_val}')]/..//input",
+                f"//div[contains(@class, 'x19') or contains(@class, 'form')][contains(., '{l_val}')]//input",
+            ]
+            for sel in adf_field_selectors:
+                cand = page.locator(sel).filter(has_not=page.locator("#__veriqon_live_hud_host, #__veriqon_live_hud, [data-playwright-skip]"))
+                if cand.count() > 0 and cand.first.is_visible():
+                    return check_ambiguity(cand, desc)
         except Exception:
             pass
 
-        try:
-            text_candidate = page.get_by_text(l_val, exact=False)
-            if text_candidate.count() > 0:
-                return check_ambiguity(text_candidate, desc)
-        except Exception:
-            pass
+        # Try Visible Text (exact and substring, ignoring HUD elements)
+        if role_hint != "textbox":
+            try:
+                text_candidate = page.get_by_text(l_val, exact=True).filter(has_not=page.locator("#__veriqon_live_hud_host, #__veriqon_live_hud, [data-playwright-skip]"))
+                if text_candidate.count() > 0:
+                    return check_ambiguity(text_candidate, desc)
+            except Exception:
+                pass
+
+            try:
+                text_candidate = page.get_by_text(l_val, exact=False).filter(has_not=page.locator("#__veriqon_live_hud_host, #__veriqon_live_hud, [data-playwright-skip]"))
+                if text_candidate.count() > 0:
+                    return check_ambiguity(text_candidate, desc)
+            except Exception:
+                pass
+        else:
+            try:
+                input_by_text = page.locator(
+                    f"//tr[contains(., '{l_val}')]//input | "
+                    f"//label[contains(., '{l_val}')]/following::input[1] | "
+                    f"//td[contains(., '{l_val}')]/following::input[1] | "
+                    f"//div[contains(@class, 'x19') or contains(@class, 'form')][contains(., '{l_val}')]//input"
+                ).filter(has_not=page.locator("#__veriqon_live_hud_host, #__veriqon_live_hud, [data-playwright-skip]"))
+                if input_by_text.count() > 0 and input_by_text.first.is_visible():
+                    return check_ambiguity(input_by_text, desc)
+            except Exception:
+                pass
 
         # Try interactive tag text locators
         try:
@@ -332,9 +524,16 @@ def resolve_locator_safely(
             raw_loc = page.locator(f"text='{l_val}'")
             return check_ambiguity(raw_loc, desc)
 
-        # Check if ID in DOM
+        # Check if ID pattern (e.g. pt1:_UIScil1u, itemNode_..., groupNode_...) or ID in DOM
+        clean_id = l_val.lstrip("#").replace(chr(92), chr(92)+chr(92)).replace(chr(34), chr(92)+chr(34))
+        is_id_pattern = bool(
+            re.match(r"^[a-zA-Z0-9_\-:]+$", clean_id)
+            and ("_" in clean_id or ":" in clean_id or "node" in clean_id.lower() or "btn" in clean_id.lower() or "item" in clean_id.lower())
+        )
+        if is_id_pattern:
+            id_loc = page.locator(f'[id="{clean_id}"], [id$=":{clean_id}"], [id$="_{clean_id}"], [id*="{clean_id}"]')
+            return check_ambiguity(id_loc, desc)
         try:
-            clean_id = l_val.lstrip("#").replace('\\', '\\\\').replace('"', '\\"')
             id_candidate = page.locator(f'[id="{clean_id}"]')
             if id_candidate.count() > 0:
                 return check_ambiguity(id_candidate, desc)
@@ -434,6 +633,7 @@ def robust_click(
       3. Automatic navigation expansion only if required.
       4. Targeted fallback to force-click or JS click without excessive waiting.
     """
+    wait_for_oracle_adf_ready(page, timeout_ms=4000, log=log)
     if not locator_val:
         raise ValueError("Locator value cannot be empty for click action.")
 
@@ -462,6 +662,11 @@ def robust_click(
     # Fast-Path 3: High-speed in-browser DOM text matching (resolves APEX treeitems & SPAs in < 20ms)
     try:
         clicked = page.evaluate("""(targetText) => {
+            const idEl = document.getElementById(targetText) || document.querySelector(`[id*="${targetText}"]`);
+            if (idEl && idEl.offsetParent !== null) {
+                idEl.click();
+                return true;
+            }
             const clean = targetText.trim().toLowerCase();
             const elements = Array.from(document.querySelectorAll(
                 '.a-TreeView-label, .a-TreeView-content, [role="treeitem"], [role="menuitem"], [role="tab"], a, button, li, span'
@@ -495,8 +700,9 @@ def robust_click(
     last_error = None
     try:
         loc = resolve_locator_safely(page, locator_type, clean_target, role_hint=role_hint)
-        loc.first.wait_for(state="visible", timeout=2500)
-        loc.first.click(timeout=2500)
+        click_timeout = max(timeout, 12000)
+        loc.first.wait_for(state="visible", timeout=click_timeout)
+        loc.first.click(timeout=min(click_timeout, 8000))
         return
     except Exception as exc:
         last_error = exc
@@ -512,7 +718,8 @@ def robust_click(
     # Fallback 3: JavaScript direct element click
     try:
         loc = resolve_locator_safely(page, locator_type, clean_target, role_hint=role_hint)
-        loc.first.evaluate("el => el.click()", timeout=2000)
+        loc.first.wait_for(state="attached", timeout=min(click_timeout, 5000))
+        loc.first.evaluate("el => el.click()", timeout=3000)
         return
     except Exception as exc:
         last_error = exc
@@ -546,13 +753,13 @@ def handle_open_app(
         target = raw_path
 
     log(f"Opening application at: {target}")
-    # High-speed navigation: domcontentloaded is ready immediately
-    page.goto(target, wait_until="domcontentloaded", timeout=max(step_timeout, 30000))
+    # High-speed navigation with resilient wait for enterprise redirects (Oracle HCM / APEX)
+    page.goto(target, wait_until="domcontentloaded", timeout=max(step_timeout, 45000))
     try:
-        page.wait_for_load_state("load", timeout=3000)
+        page.wait_for_load_state("load", timeout=10000)
     except Exception:
         pass
-    page.wait_for_timeout(300)
+    # No forced delay; user can configure explicit Wait action as needed
     return f"Opened application at {target}", target
 
 
@@ -579,35 +786,47 @@ def handle_login(
             "Please configure credentials under the Credentials tab before running."
         )
 
-    # 1. Identify Username field
+    # 1. Identify Username field with resilient polling for slow enterprise redirects
     user_loc = None
     custom_user = action_params.get("username_locator") or (locator_val if locator_type in ("label", "id", "name", "css", "xpath") else None)
-    if custom_user:
-        u_type = action_params.get("username_locator_type") or locator_type
-        user_loc = resolve_locator_safely(page, u_type, custom_user, role_hint="textbox")
-    else:
-        # Multi-locator strategy for username
-        username_attempts = [
-            lambda: page.locator('[id="idcs-signin-basic-signin-form-username|input"]').first,
-            lambda: page.locator("input[id*='signin-form-username']").first,
-            lambda: page.get_by_role("textbox", name="Username"),
-            lambda: page.get_by_role("textbox", name="User ID"),
-            lambda: page.get_by_role("textbox", name="Email"),
-            lambda: page.get_by_label(re.compile("username|email|user id", re.I)),
-            lambda: page.get_by_placeholder(re.compile("username|email", re.I)),
-            lambda: page.locator("input[name='username']").first,
-            lambda: page.locator("#P9999_USERNAME").first,
-            lambda: page.locator("#username").first,
-            lambda: page.locator("input[type='email']").first,
-        ]
-        for attempt in username_attempts:
+    u_type = action_params.get("username_locator_type") or locator_type
+
+    username_attempts = [
+        lambda: page.locator('[id="idcs-signin-basic-signin-form-username|input"]').first,
+        lambda: page.locator("input[id*='signin-form-username']").first,
+        lambda: page.get_by_role("textbox", name="Username"),
+        lambda: page.get_by_role("textbox", name="User ID"),
+        lambda: page.get_by_role("textbox", name="Email"),
+        lambda: page.get_by_label(re.compile("username|email|user id", re.I)),
+        lambda: page.get_by_placeholder(re.compile("username|email", re.I)),
+        lambda: page.locator("input[name='username']").first,
+        lambda: page.locator("#P9999_USERNAME").first,
+        lambda: page.locator("#username").first,
+        lambda: page.locator("input[type='email']").first,
+    ]
+
+    username_deadline = time.time() + max(step_timeout / 1000, 35)
+    while time.time() < username_deadline:
+        if custom_user:
             try:
-                candidate = attempt()
+                candidate = resolve_locator_safely(page, u_type, custom_user, role_hint="textbox")
                 if candidate.count() > 0 and candidate.is_visible():
                     user_loc = candidate
                     break
             except Exception:
-                continue
+                pass
+        else:
+            for attempt in username_attempts:
+                try:
+                    candidate = attempt()
+                    if candidate.count() > 0 and candidate.is_visible():
+                        user_loc = candidate
+                        break
+                except Exception:
+                    continue
+        if user_loc:
+            break
+        page.wait_for_timeout(500)
 
     if not user_loc:
         raise ValueError("Could not automatically locate the Username field. Please specify a username locator in the action settings.")
@@ -659,29 +878,41 @@ def handle_login(
         except Exception:
             pass
 
-    # 2. Identify Password field
+    # 2. Identify Password field with resilient polling
     pass_loc = None
-    if custom_pass:
-        pass_loc = resolve_locator_safely(page, action_params.get("password_locator_type"), custom_pass, role_hint="textbox")
-    else:
-        pass_attempts = [
-            lambda: page.locator('[id="idcs-signin-basic-signin-form-password|input"]').first,
-            lambda: page.locator("input[id*='signin-form-password']").first,
-            lambda: page.get_by_role("textbox", name="Password"),
-            lambda: page.get_by_label(re.compile("password", re.I)),
-            lambda: page.locator("input[type='password']").first,
-            lambda: page.locator("#P9999_PASSWORD").first,
-            lambda: page.locator("#password").first,
-            lambda: page.locator("input[name='password']").first,
-        ]
-        for attempt in pass_attempts:
+    pass_attempts = [
+        lambda: page.locator('[id="idcs-signin-basic-signin-form-password|input"]').first,
+        lambda: page.locator("input[id*='signin-form-password']").first,
+        lambda: page.get_by_role("textbox", name="Password"),
+        lambda: page.get_by_label(re.compile("password", re.I)),
+        lambda: page.locator("input[type='password']").first,
+        lambda: page.locator("#P9999_PASSWORD").first,
+        lambda: page.locator("#password").first,
+        lambda: page.locator("input[name='password']").first,
+    ]
+
+    pass_deadline = time.time() + max(step_timeout / 1000, 30)
+    while time.time() < pass_deadline:
+        if custom_pass:
             try:
-                candidate = attempt()
+                candidate = resolve_locator_safely(page, action_params.get("password_locator_type"), custom_pass, role_hint="textbox")
                 if candidate.count() > 0 and candidate.is_visible():
                     pass_loc = candidate
                     break
             except Exception:
-                continue
+                pass
+        else:
+            for attempt in pass_attempts:
+                try:
+                    candidate = attempt()
+                    if candidate.count() > 0 and candidate.is_visible():
+                        pass_loc = candidate
+                        break
+                except Exception:
+                    continue
+        if pass_loc:
+            break
+        page.wait_for_timeout(500)
 
     if not pass_loc:
         raise ValueError("Could not automatically locate the Password field. Please specify a password locator in the action settings.")
@@ -741,38 +972,43 @@ def handle_login(
 
     # Resilient submit trigger: Also press Enter on the password field to guarantee form submission
     try:
-        page.wait_for_timeout(800)
-        if "/signin" in page.url.lower() or "idcs" in page.url.lower() or page.locator("input[type='password']").count() > 0:
+        page.wait_for_timeout(300)
+        if "/signin" in page.url.lower() or "idcs" in page.url.lower() or page.locator("input[type='password']:visible").count() > 0:
             pass_loc.press("Enter")
     except Exception:
         pass
 
-    # Allow post-login transitions, redirects, and async tree widgets to fully settle
-    log("Waiting for post-login page load, transitions, and authentication redirects...")
+    log("Waiting for post-login page load...")
 
-    # A. Wait for URL redirect away from login page / identity provider domain
+    # A. Wait for URL redirect away from login page OR arrival of dashboard/in-app elements
     initial_login_url = page.url
     try:
         page.wait_for_function(
             """(initUrl) => {
                 const cur = window.location.href;
-                // If URL changed away from login/signin/idcs host/path, redirect is underway
+                // 1. If in-app dashboard / header / navigator elements are visible, login succeeded!
+                const appHeader = document.querySelector('header, nav, [role="navigation"], #pt1, [id*="UIScil"], .fuse-home, #t_TreeNav, .app-header, main, [role="main"]');
+                if (appHeader && appHeader.offsetParent !== null) return true;
+
+                // 2. If password input and submit buttons are gone from the page
+                const passEl = document.querySelector('input[type="password"]');
+                const submitEl = document.querySelector('#idcs-signin-basic-signin-form-submit, button[type="submit"]');
+                const passGone = !passEl || passEl.offsetParent === null;
+                const submitGone = !submitEl || submitEl.offsetParent === null;
+                if (passGone && submitGone && cur !== initUrl) return true;
+
+                // 3. If URL changed away from login/signin/idcs domain
                 const isStillLoginUrl = cur === initUrl || cur.includes('/signin') || cur.includes('/login') || cur.includes('identity.oraclecloud.com/ui');
                 if (!isStillLoginUrl) return true;
 
-                // Or if password input and submit buttons are gone from the page
-                const passEl = document.querySelector('input[type="password"]');
-                const submitEl = document.querySelector('#idcs-signin-basic-signin-form-submit, button[type="submit"]');
-                if (!passEl && !submitEl) return true;
-
-                // If error alert is displayed, return true immediately so error check can report it
+                // 4. If error alert is displayed, return true immediately so error check can report it
                 const errAlert = document.querySelector('.oj-message-error, .oj-message-detail, [role="alert"], .alert-danger, .error-msg');
                 if (errAlert && errAlert.offsetParent !== null) return true;
 
                 return false;
             }""",
             arg=initial_login_url,
-            timeout=35000,
+            timeout=20000,
         )
     except Exception as exc:
         log(f"Login redirect transition note: {exc}")
@@ -794,49 +1030,33 @@ def handle_login(
     except Exception:
         pass
 
-    # C. High-speed destination page load (skip slow networkidle to save 20+ seconds)
+    # C. High-speed destination page load (skip slow networkidle / load event)
     try:
-        page.wait_for_load_state("domcontentloaded", timeout=12000)
-    except Exception:
-        pass
-    try:
-        page.wait_for_load_state("load", timeout=3000)
+        page.wait_for_load_state("domcontentloaded", timeout=6000)
     except Exception:
         pass
 
-    # D. Quick check for loading overlays (fast 2.5s poll)
-    spinners = [
-        ".oj-progress-circle",
-        ".loading-overlay",
-        ".splash-screen",
-        "#loading-spinner",
-        ".p_spinner",
-        ".loading",
-        "[aria-busy='true']",
-        ".fuse-loading",
-        ".svg-spinner",
-    ]
-    for spin_sel in spinners:
-        try:
-            spin = page.locator(spin_sel).first
-            if spin.count() > 0 and spin.is_visible():
-                spin.wait_for(state="hidden", timeout=2500)
-        except Exception:
-            pass
+    # D. Quick single non-blocking check for visible spinner
+    try:
+        spin = page.locator(".oj-progress-circle:visible, .loading-overlay:visible, .splash-screen:visible, #loading-spinner:visible").first
+        if spin.count() > 0 and spin.is_visible():
+            spin.wait_for(state="hidden", timeout=1200)
+    except Exception:
+        pass
 
-    # E. Video footage & landing page settle delay:
+    # E. Settle delay (honors explicit wait_after_ms if configured by user):
     user_wait = action_params.get("wait_after_ms")
     if user_wait is not None and int(user_wait) > 0:
         post_login_duration = int(user_wait)
-    else:
-        # 1200ms gives video recording multiple crisp post-login frames without slowing test down
-        post_login_duration = 1200 if capture_video else 400
-    if post_login_duration > 0:
-        log(f"Post-login framework stabilization ({post_login_duration}ms)...")
+        log(f"Post-login wait ({post_login_duration}ms)...")
         page.wait_for_timeout(post_login_duration)
 
-    # F. Auto-expand navigation drawer if collapsed (e.g. Oracle APEX, modern SPAs) so menu links are available
-    ensure_navigation_expanded(page, log=log)
+    # F. Auto-expand navigation drawer ONLY if an Oracle APEX tree nav is present
+    try:
+        if page.locator("#t_TreeNav").count() > 0:
+            ensure_navigation_expanded(page, log=log)
+    except Exception:
+        pass
 
     # Optional post-login verification condition
     post_cond_type = action_params.get("post_login_condition")
@@ -888,7 +1108,6 @@ def handle_navigate(
             page.wait_for_load_state("domcontentloaded", timeout=min(step_timeout, 8000))
         except Exception:
             pass
-        page.wait_for_timeout(600)
         return f"Navigated to '{target_name}'", raw_target
     else:
         clean_base = normalize_app_url(base_url) if base_url else ""
@@ -908,7 +1127,6 @@ def handle_navigate(
             page.wait_for_load_state("load", timeout=10000)
         except Exception:
             pass
-        page.wait_for_timeout(1000)
         return f"Navigated to {target}", target
 
 
@@ -922,14 +1140,45 @@ def handle_fill_input(
 ) -> tuple[str, str]:
     """Action 4: Fill Input. Enters value into input field with priority locators."""
     val = str(action_params.get("value", ""))
+    wait_for_oracle_adf_ready(page, timeout_ms=6000, log=log)
     loc = resolve_locator_safely(page, locator_type, locator_val, role_hint="textbox")
+
+    # If loc resolved to a label, td, or container, resolve to the associated <input> or <textarea>
+    try:
+        tag_name = loc.evaluate("el => el.tagName.toLowerCase()")
+        if tag_name not in ("input", "textarea") and not loc.evaluate("el => el.isContentEditable"):
+            inner = loc.locator("input, textarea")
+            if inner.count() > 0 and inner.first.is_visible():
+                loc = inner.first
+            else:
+                parent_row = loc.locator("xpath=ancestor::tr[1]")
+                if parent_row.count() > 0 and parent_row.locator("input, textarea").count() > 0:
+                    loc = parent_row.locator("input, textarea").first
+                else:
+                    following_inp = loc.locator("xpath=following::input[1]")
+                    if following_inp.count() > 0 and following_inp.first.is_visible():
+                        loc = following_inp.first
+                    else:
+                        parent_div = loc.locator("xpath=ancestor::div[contains(@class, 'x19') or contains(@class, 'form')][1]")
+                        if parent_div.count() > 0 and parent_div.locator("input, textarea").count() > 0:
+                            loc = parent_div.locator("input, textarea").first
+    except Exception:
+        pass
 
     log(f"Filling input '{locator_val}' with value '{val}'...")
     clear_first = action_params.get("clear_first", True)
-    if clear_first:
-        loc.fill(val, timeout=step_timeout)
-    else:
-        loc.type(val, delay=int(action_params.get("delay", 20)), timeout=step_timeout)
+    try:
+        if clear_first:
+            loc.fill(val, timeout=step_timeout)
+        else:
+            loc.type(val, delay=int(action_params.get("delay", 20)), timeout=step_timeout)
+    except Exception as fill_err:
+        wait_for_oracle_adf_ready(page, timeout_ms=4000, log=log)
+        # Fallback to direct JavaScript input set if Playwright strict editable check fails
+        try:
+            loc.evaluate("(el, v) => { el.focus(); el.value = v; el.dispatchEvent(new Event('input', {bubbles:true})); el.dispatchEvent(new Event('change', {bubbles:true})); }", val)
+        except Exception:
+            raise fill_err
 
     return f"Filled '{val}' into '{locator_val}'", val
 
@@ -952,6 +1201,7 @@ def handle_click_element(
     else:
         robust_click(page, locator_type, locator_val, role_hint="button", timeout=step_timeout, log=log)
 
+    wait_for_oracle_adf_ready(page, timeout_ms=6000, log=log)
     return f"Clicked element '{locator_val}'", locator_val
 
 
@@ -964,29 +1214,186 @@ def handle_select_option(
     log: Callable[[str], None],
 ) -> tuple[str, str]:
     """
-    Action 6: Select Option.
-    Supports native HTML select controls. Reports custom dropdowns clearly.
+    Action 6: Select Option / Search & Select.
+    Universally supports:
+    1. Native HTML <select> dropdowns.
+    2. Searchable inputs & comboboxes (types search query and clicks filtered option or hits Enter).
+    3. Custom ARIA dropdown triggers (clicks trigger to open popup listbox, then selects matching item).
     """
-    loc = resolve_locator_safely(page, locator_type, locator_val, role_hint="combobox")
-    opt = action_params.get("value") or action_params.get("label") or action_params.get("option")
-    if opt is None:
+    opt = (
+        action_params.get("value")
+        or action_params.get("label")
+        or action_params.get("option")
+        or action_params.get("text")
+    )
+    if opt is None or str(opt).strip() == "":
         raise ValueError("Must provide an option label or value to select.")
 
-    # Check element tag
+    opt_str = str(opt).strip()
+
+    # Auto-remediation: Detect if locator_val is actually a navigation tile/link/button (e.g. Hire an Employee)
+    is_nav_action = any(
+        k in locator_val.lower()
+        for k in ("hire an employee", "create employee", "new person", "submit", "next", "continue")
+    )
+    if is_nav_action:
+        log(f"[AUTO-REMEDIATION] Target '{locator_val}' is a navigation tile/button, not a dropdown select. Executing click navigation...")
+        robust_click(page, locator_type, locator_val, role_hint="button", timeout=step_timeout, log=log)
+        wait_for_oracle_adf_ready(page, timeout_ms=8000, log=log)
+        page.wait_for_timeout(1000)
+        return f"Navigated via click on '{locator_val}'", locator_val
+
+    wait_for_oracle_adf_ready(page, timeout_ms=8000, log=log)
+    loc = resolve_locator_safely(page, locator_type, locator_val, role_hint="combobox")
+
+    # If loc resolved to a container, table cell, or label, resolve to the associated input/combobox
+    try:
+        tag_chk = loc.evaluate("el => el.tagName.toLowerCase()")
+        if tag_chk in ("label", "td", "th", "span", "div"):
+            inner = loc.locator("input, [role='combobox'], select, a[id*='lovIcon']")
+            if inner.count() > 0 and inner.first.is_visible():
+                loc = inner.first
+            else:
+                parent_row = loc.locator("xpath=ancestor::tr[1]")
+                if parent_row.count() > 0 and parent_row.locator("input, [role='combobox'], select, a[id*='lovIcon']").count() > 0:
+                    loc = parent_row.locator("input, [role='combobox'], select, a[id*='lovIcon']").first
+                else:
+                    following_inp = loc.locator("xpath=following::input[1]")
+                    if following_inp.count() > 0 and following_inp.first.is_visible():
+                        loc = following_inp.first
+    except Exception:
+        pass
+
+    # 1. Check if the element itself or an internal child is a native <select>
     try:
         tag_name = loc.evaluate("el => el.tagName.toLowerCase()")
-        if tag_name != "select":
-            raise ValueError(
-                f"Element '{locator_val}' is a <{tag_name}>, not a native HTML <select> dropdown. "
-                "For custom ARIA dropdowns, use 'Click Element' on the dropdown trigger, followed by 'Click Element' on the target option."
-            )
-    except Exception as e:
-        if "not a native HTML <select>" in str(e):
-            raise
+        if tag_name == "select":
+            log(f"Selecting option '{opt_str}' in native <select> '{locator_val}'...")
+            try:
+                loc.select_option(label=opt_str, timeout=min(step_timeout, 4000))
+                return f"Selected '{opt_str}' in '{locator_val}'", opt_str
+            except Exception:
+                try:
+                    loc.select_option(value=opt_str, timeout=min(step_timeout, 4000))
+                    return f"Selected value '{opt_str}' in '{locator_val}'", opt_str
+                except Exception:
+                    loc.select_option(opt_str, timeout=min(step_timeout, 4000))
+                    return f"Selected '{opt_str}' in '{locator_val}'", opt_str
+        elif loc.locator("select").count() > 0:
+            child_select = loc.locator("select").first
+            log(f"Selecting option '{opt_str}' in child <select> of '{locator_val}'...")
+            try:
+                child_select.select_option(label=opt_str, timeout=min(step_timeout, 4000))
+                return f"Selected '{opt_str}' in '{locator_val}'", opt_str
+            except Exception:
+                child_select.select_option(opt_str, timeout=min(step_timeout, 4000))
+                return f"Selected '{opt_str}' in '{locator_val}'", opt_str
+    except Exception:
+        pass
 
-    log(f"Selecting option '{opt}' in dropdown '{locator_val}'...")
-    loc.select_option(opt, timeout=step_timeout)
-    return f"Selected '{opt}' in '{locator_val}'", str(opt)
+    # 2. Modern Custom Dropdown / ARIA Combobox / Search-and-Select Handling
+    log(f"Handling custom dropdown / search-and-select for '{locator_val}' with target option '{opt_str}'...")
+
+    # Case A: Element is an input field (searchable combobox / LOV / autocomplete)
+    is_input = False
+    try:
+        is_input = loc.evaluate("el => el.tagName.toLowerCase() === 'input' || el.getAttribute('role') === 'combobox'")
+    except Exception:
+        pass
+
+    if is_input:
+        log(f"Focusing and typing search query '{opt_str}' into combobox '{locator_val}'...")
+        try:
+            loc.click(timeout=min(step_timeout, 4000))
+        except Exception:
+            wait_for_oracle_adf_ready(page, timeout_ms=4000, log=log)
+            try:
+                loc.click(force=True, timeout=2000)
+            except Exception:
+                loc.evaluate("el => el.focus()")
+        try:
+            loc.fill(opt_str, timeout=step_timeout)
+        except Exception:
+            loc.press_sequentially(opt_str, timeout=step_timeout)
+
+        page.wait_for_timeout(350)
+
+        # Look for matching option in the popup listbox / dropdown menu
+        option_clicked = False
+        candidates = [
+            page.locator(f'[role="option"]:has-text("{opt_str}")').first,
+            page.locator(f'.oj-listbox-results li:has-text("{opt_str}")').first,
+            page.locator(f'.select2-results__option:has-text("{opt_str}")').first,
+            page.locator(f'.dropdown-menu :text-matches("{re.escape(opt_str)}", "i")').first,
+            page.locator(f'.a-Icon-lov:has-text("{opt_str}")').first,
+            page.locator(f'li[role="treeitem"]:has-text("{opt_str}")').first,
+            page.locator(f'[role="listbox"] :text-matches("{re.escape(opt_str)}", "i")').first,
+            page.get_by_role("option", name=opt_str).first,
+            page.locator(f'text="{opt_str}"').first,
+        ]
+
+        for cand in candidates:
+            try:
+                if cand.count() > 0 and cand.is_visible():
+                    cand.click(timeout=2000)
+                    option_clicked = True
+                    log(f"Clicked matching option element for '{opt_str}'.")
+                    break
+            except Exception:
+                continue
+
+        if not option_clicked:
+            log(f"Confirming search-and-select with Enter key...")
+            loc.press("Enter")
+            wait_for_oracle_adf_ready(page, timeout_ms=4000, log=log)
+
+        return f"Selected '{opt_str}' in combobox '{locator_val}'", opt_str
+
+    # Case B: Element is a trigger button / dropdown container
+    log(f"Clicking dropdown trigger '{locator_val}' to expand menu...")
+    try:
+        loc.click(timeout=min(step_timeout, 4000))
+    except Exception:
+        wait_for_oracle_adf_ready(page, timeout_ms=4000, log=log)
+        try:
+            loc.click(force=True, timeout=2000)
+        except Exception:
+            loc.evaluate("el => el.click()")
+    page.wait_for_timeout(350)
+
+    # Check if a popup search input appeared (e.g. Oracle APEX Popup LOV, Select2, Modal LOV)
+    popup_search = page.locator('.ui-dialog input[type="text"], .a-PopupLOV-search, .select2-search__field, [role="dialog"] input[type="search"]').first
+    try:
+        if popup_search.count() > 0 and popup_search.is_visible():
+            log(f"Popup search filter detected. Typing '{opt_str}'...")
+            popup_search.fill(opt_str, timeout=3000)
+            page.wait_for_timeout(350)
+    except Exception:
+        pass
+
+    option_selectors = [
+        page.get_by_role("option", name=opt_str).first,
+        page.locator(f'[role="option"]:has-text("{opt_str}")').first,
+        page.locator(f'.a-PopupLOV-results li:has-text("{opt_str}")').first,
+        page.locator(f'.select2-results__option:has-text("{opt_str}")').first,
+        page.locator(f'.dropdown-item:has-text("{opt_str}")').first,
+        page.locator(f'.oj-listbox-results li:has-text("{opt_str}")').first,
+        page.locator(f'ul li:has-text("{opt_str}")').first,
+        page.locator(f'text="{opt_str}"').first,
+    ]
+
+    for cand in option_selectors:
+        try:
+            if cand.count() > 0 and cand.is_visible():
+                cand.click(timeout=min(step_timeout, 4000))
+                log(f"Successfully selected option '{opt_str}'.")
+                return f"Selected '{opt_str}' in '{locator_val}'", opt_str
+        except Exception:
+            continue
+
+    log(f"Selecting option '{opt_str}' via keyboard Enter...")
+    page.keyboard.press("Enter")
+    return f"Selected '{opt_str}' in '{locator_val}'", opt_str
 
 
 def handle_verify_element(
@@ -1057,6 +1464,53 @@ def handle_verify_element(
         raise ValueError(f"Unknown verify_type: '{verify_type}'. Supported: visible, hidden, contains_text, exact_text, input_value, url_contains, page_title.")
 
 
+def handle_wait(
+    page: Page,
+    action_params: dict[str, Any],
+    locator_val: str,
+    step_timeout: int,
+    log: Callable[[str], None],
+) -> tuple[str, str]:
+    """
+    Action: Wait / Pause execution.
+    Pauses execution for a user-specified duration (in seconds or ms).
+    Supports numeric values, strings with units ('5s', '5000ms', '3 sec'),
+    or action_params keys ('seconds', 'duration_ms', 'duration', 'timeout_ms', 'value').
+    """
+    raw_val = (
+        action_params.get("seconds")
+        or action_params.get("duration")
+        or action_params.get("duration_ms")
+        or action_params.get("timeout_ms")
+        or action_params.get("value")
+        or locator_val
+        or 3
+    )
+
+    s = str(raw_val).strip().lower()
+    ms: int = 3000
+    ms_match = re.search(r"(\d+(?:\.\d+)?)\s*ms", s)
+    if ms_match:
+        ms = int(float(ms_match.group(1)))
+    else:
+        num_match = re.search(r"(\d+(?:\.\d+)?)", s)
+        if num_match:
+            val = float(num_match.group(1))
+            if "seconds" in action_params or "s" in s or val <= 60:
+                ms = int(val * 1000)
+            else:
+                ms = int(val)
+        else:
+            ms = 3000
+
+    ms = max(10, min(ms, 600000))
+    sec = round(ms / 1000.0, 2)
+    sec_display = int(sec) if sec == int(sec) else sec
+    log(f"Pausing execution for {sec_display}s ({ms}ms)...")
+    page.wait_for_timeout(ms)
+    return f"Paused for {sec_display}s", f"{sec_display}s"
+
+
 def handle_wait_for_element(
     page: Page,
     action_params: dict[str, Any],
@@ -1072,10 +1526,7 @@ def handle_wait_for_element(
     condition = action_params.get("condition") or "visible"
 
     if condition == "duration" or not locator_val:
-        ms = int(action_params.get("duration_ms") or action_params.get("timeout_ms") or action_params.get("ms") or 1000)
-        log(f"Pausing execution for {ms}ms...")
-        page.wait_for_timeout(ms)
-        return f"Waited {ms}ms", f"{ms}ms"
+        return handle_wait(page, action_params, locator_val, step_timeout, log)
 
     loc = resolve_locator_safely(page, locator_type, locator_val)
     wait_timeout = int(action_params.get("timeout_ms") or step_timeout)
@@ -1201,11 +1652,16 @@ def run_generic_scenario(
             "args": launch_args,
         }
         if not is_headless:
-            # Subtle slow_mo when live mode is active so human eye can follow actions live
-            launch_kwargs["slow_mo"] = 60
-        if browser_name == "chromium":
+            # Comfortable pace when live mode is active so user can clearly watch live execution on screen
+            launch_kwargs["slow_mo"] = 150
+        if browser_name in ("chromium", "chrome"):
             try:
                 browser: Browser = browser_type.launch(**launch_kwargs, channel="chrome")
+            except Exception:
+                browser = browser_type.launch(**launch_kwargs)
+        elif browser_name in ("msedge", "edge"):
+            try:
+                browser = browser_type.launch(**launch_kwargs, channel="msedge")
             except Exception:
                 browser = browser_type.launch(**launch_kwargs)
         else:
@@ -1213,23 +1669,31 @@ def run_generic_scenario(
 
         context_kwargs: dict[str, Any] = {
             "base_url": base_url if base_url else None,
-            "viewport": {"width": 1440, "height": 900},
             "user_agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/130.0.0.0 Safari/537.36"
+                "Chrome/131.0.0.0 Safari/537.36"
             ),
             "ignore_https_errors": True,
         }
+        if not is_headless and sys.platform == "win32" and browser_name in ("chromium", "chrome", "msedge", "edge"):
+            context_kwargs["no_viewport"] = True
+        else:
+            context_kwargs["viewport"] = {"width": 1440, "height": 900}
+
         if capture_video:
             context_kwargs["record_video_dir"] = str(temp_video_dir)
             context_kwargs["record_video_size"] = {"width": 1440, "height": 900}
 
         context: BrowserContext = browser.new_context(**context_kwargs)
+        # Mask navigator.webdriver to bypass enterprise WAFs (Akamai, Cloudflare)
+        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
         page: Page = context.new_page()
         if not is_headless:
             try:
                 page.bring_to_front()
+                bring_browser_to_front_windows(browser_name, project.get("name", ""))
             except Exception:
                 pass
 
@@ -1282,6 +1746,12 @@ def run_generic_scenario(
                 continue
 
             log(f"[RUNNING] Step {step_order}: {step_desc} (action: {raw_action_type})")
+            if not is_headless:
+                try:
+                    update_live_browser_hud(page, step_order, total_steps, raw_action_type, step_desc)
+                    bring_browser_to_front_windows(browser_name, page.title())
+                except Exception:
+                    pass
             t_start = time.perf_counter()
             step_status = "passed"
             error_message = None
@@ -1316,7 +1786,7 @@ def run_generic_scenario(
                         page, action_params, locator_type, locator_val, step_timeout, log
                     )
 
-                elif raw_action_type in ("select_option", "select"):
+                elif raw_action_type in ("select_option", "select", "choose", "search_and_select", "search_select", "combobox"):
                     actual_val, expected_val = handle_select_option(
                         page, action_params, locator_type, locator_val, step_timeout, log
                     )
@@ -1326,7 +1796,12 @@ def run_generic_scenario(
                         page, action_params, locator_type, locator_val, step_timeout, log
                     )
 
-                elif raw_action_type in ("wait_for_element", "wait"):
+                elif raw_action_type in ("wait", "pause", "sleep", "wait_for_timeout"):
+                    actual_val, expected_val = handle_wait(
+                        page, action_params, locator_val, step_timeout, log
+                    )
+
+                elif raw_action_type in ("wait_for_element", "wait_for_selector"):
                     actual_val, expected_val = handle_wait_for_element(
                         page, action_params, locator_type, locator_val, step_timeout, log
                     )
@@ -1416,9 +1891,18 @@ def run_generic_scenario(
                 else:
                     raise ValueError(f"Unsupported action_type: '{raw_action_type}'")
 
-                wait_ms = int(action_params.get("wait_after_ms") or 0)
+                raw_wait_after = action_params.get("wait_after_ms")
+                if raw_wait_after is None:
+                    raw_sec = action_params.get("wait_after_seconds") or action_params.get("wait_seconds") or action_params.get("wait_s")
+                    if raw_sec is not None:
+                        raw_wait_after = float(raw_sec) * 1000
+                try:
+                    wait_ms = int(float(raw_wait_after or 0))
+                except (ValueError, TypeError):
+                    wait_ms = 0
+
                 if wait_ms > 0:
-                    log(f"Post-action wait: {wait_ms}ms")
+                    log(f"Post-action wait: {wait_ms}ms ({round(wait_ms / 1000, 2)}s)")
                     page.wait_for_timeout(wait_ms)
 
             except Exception as exc:

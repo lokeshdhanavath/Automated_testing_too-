@@ -136,7 +136,46 @@ const navigation: {
 ];
 
 export default function App() {
-  const [page, setPage] = useState<Page>("Applications");
+  const [page, setPage] = useState<Page>(() => {
+    try {
+      // 1. Check URL hash first for direct navigation and persistence across tab reloads
+      const rawHash = window.location.hash.replace("#/", "").replace("#", "").trim().toLowerCase();
+      const hashMap: Record<string, Page> = {
+        "overview": "Overview",
+        "applications": "Applications",
+        "workflow-studio": "Workflow Studio",
+        "workflows": "Workflow Studio",
+        "capture-page": "Capture Page",
+        "capture": "Capture Page",
+        "credentials": "Credentials",
+        "test-runs": "Test Runs",
+        "runs": "Test Runs",
+        "test-evidence": "Test Evidence",
+        "evidence": "Test Evidence",
+        "screenshots": "Screenshots & Recordings",
+        "recordings": "Screenshots & Recordings",
+      };
+      if (rawHash && hashMap[rawHash]) {
+        return hashMap[rawHash];
+      }
+      // 2. Fall back to localStorage
+      const savedPage = localStorage.getItem("veriqon_active_page");
+      if (savedPage && [
+        "Applications",
+        "Overview",
+        "Workflow Studio",
+        "Capture Page",
+        "Credentials",
+        "Test Runs",
+        "Test Evidence",
+        "Screenshots & Recordings"
+      ].includes(savedPage)) {
+        return savedPage as Page;
+      }
+    } catch {}
+    return "Overview";
+  });
+
   const [artifactTab, setArtifactTab] = useState<"Screenshots" | "Videos">("Screenshots");
   const [tests, setTests] = useState<TestCase[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
@@ -155,7 +194,13 @@ export default function App() {
 
   // Projects are persisted by FastAPI in a local JSON registry.
   const [projects, setProjects] = useState<ProjectConfig[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState("apex-timesheet");
+  const [activeProjectId, setActiveProjectId] = useState<string>(() => {
+    try {
+      return localStorage.getItem("veriqon_active_project_id") || "apex-timesheet";
+    } catch {
+      return "apex-timesheet";
+    }
+  });
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectSaving, setProjectSaving] = useState(false);
   const [projectError, setProjectError] = useState("");
@@ -204,7 +249,7 @@ export default function App() {
 
   const [environment, setEnvironment] = useState("QA (Test)");
   const [browser, setBrowser] = useState("Chrome");
-  const [headless, setHeadless] = useState(true);
+  const [headless, setHeadless] = useState(false);
   const [capture, setCapture] = useState(false);
 
   function addLog(message: string) {
@@ -340,8 +385,14 @@ async function loadTests(projectId?: string) {
     try {
       const result = await getProjects();
       setProjects(result);
-      setActiveProjectId((current) => result.some((project) => project.id === current)
-        ? current : (result[0]?.id ?? "apex-timesheet"));
+      const savedProjectId = localStorage.getItem("veriqon_active_project_id");
+      setActiveProjectId((current) => {
+        if (savedProjectId && result.some((project) => project.id === savedProjectId)) {
+          return savedProjectId;
+        }
+        return result.some((project) => project.id === current)
+          ? current : (result[0]?.id ?? "apex-timesheet");
+      });
     } catch (error) {
       if (retryCount < 2) {
         setTimeout(() => void refreshProjects(retryCount + 1), 1200);
@@ -445,6 +496,68 @@ async function loadTests(projectId?: string) {
   useEffect(() => {
     void refreshProjects();
   }, []);
+
+  // Persist current active tab and sync URL hash so tab stays active across reloads and tab switches
+  useEffect(() => {
+    try {
+      localStorage.setItem("veriqon_active_page", page);
+      const pageToHash: Record<Page, string> = {
+        "Overview": "overview",
+        "Applications": "applications",
+        "Workflow Studio": "workflow-studio",
+        "Capture Page": "capture-page",
+        "Credentials": "credentials",
+        "Test Suites": "test-suites",
+        "CSV Scenarios": "csv-scenarios",
+        "Test Runs": "test-runs",
+        "Test Evidence": "test-evidence",
+        "Screenshots & Recordings": "recordings",
+        "Settings": "settings",
+      };
+      const hash = pageToHash[page];
+      if (hash && window.location.hash !== `#/${hash}`) {
+        window.history.replaceState(null, "", `#/${hash}`);
+      }
+    } catch {}
+  }, [page]);
+
+  // Handle browser back/forward buttons or hash change
+  useEffect(() => {
+    const onHashChange = () => {
+      try {
+        const rawHash = window.location.hash.replace("#/", "").replace("#", "").trim().toLowerCase();
+        const hashMap: Record<string, Page> = {
+          "overview": "Overview",
+          "applications": "Applications",
+          "workflow-studio": "Workflow Studio",
+          "workflows": "Workflow Studio",
+          "capture-page": "Capture Page",
+          "capture": "Capture Page",
+          "credentials": "Credentials",
+          "test-runs": "Test Runs",
+          "runs": "Test Runs",
+          "test-evidence": "Test Evidence",
+          "evidence": "Test Evidence",
+          "screenshots": "Screenshots & Recordings",
+          "recordings": "Screenshots & Recordings",
+        };
+        if (rawHash && hashMap[rawHash]) {
+          setPage(hashMap[rawHash]);
+        }
+      } catch {}
+    };
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  // Persist active project selection
+  useEffect(() => {
+    try {
+      if (activeProjectId) {
+        localStorage.setItem("veriqon_active_project_id", activeProjectId);
+      }
+    } catch {}
+  }, [activeProjectId]);
 
   useEffect(() => {
     if (activeProjectId) {
@@ -624,15 +737,62 @@ async function loadTests(projectId?: string) {
     setCsvLoading(true);
     try {
       const header = (await file.slice(0, 4096).text()).split(/\r?\n/, 1)[0].toLowerCase();
-      if (header.includes("action") && header.includes("element")) {
+      const isActionCsv =
+        header.includes("action") ||
+        header.includes("which action") ||
+        header.includes("target element") ||
+        (!header.includes("tc_id") && (header.includes("element") || header.includes("target") || header.includes("click") || header.includes("fill")));
+
+      if (isActionCsv) {
         const parsed = await parseWorkflowCsv(file, activeProjectId);
         setRegistryCsvMode(true);
         setRegistryCsvSteps(parsed.steps);
-        const stepRow = { TC_ID: "registry-workflow", Scenario: file.name, Preconditions: "", Steps: `${parsed.steps.length} resolved action step(s)`, Expected_Result: "Workflow steps complete", Priority: "MEDIUM", valid: true };
-        setCsvValidation({valid:true,filename:file.name,total_rows:1,valid_rows:1,columns:["step","url","element","action","value","wait_ms","on_fail"],scenarios:[stepRow]});
-        setSelectedScenarioIds(["registry-workflow"]);
-        setCsvMessage(`CSV parsed: ${parsed.steps.length} step(s), registry elements resolved.`);
-        addLog(`Registry workflow CSV parsed for ${file.name}.`);
+
+        const scenarios = (parsed.steps || []).map((s: any, idx: number) => {
+          const params = s.action_params || {};
+          const matchedName = params.element_friendly_name || s.locator_value || "";
+          const origTarget = params.original_target_input || "";
+          const conf = params.match_confidence;
+          const val = params.value || "";
+          const stepOrder = s.step_order || (idx + 1);
+
+          let stepDesc = `${s.action_type.replace('_', ' ').toUpperCase()} on "${matchedName || origTarget}"`;
+          if (params.matched_from_catalog && conf) {
+            stepDesc += ` [Catalog: ${Math.round(conf * 100)}% match]`;
+          }
+          if (val) {
+            stepDesc += ` [Data: "${val}"]`;
+          }
+
+          return {
+            TC_ID: `STEP-${String(stepOrder).padStart(3, "0")}`,
+            Scenario: s.description || `Execute ${s.action_type}`,
+            Preconditions: s.action_type === "login" ? "Vault credentials" : (s.action_type === "open_app" ? "Browser available" : ""),
+            Steps: stepDesc,
+            Expected_Result: "Action executes successfully",
+            Priority: "HIGH",
+            valid: true,
+            mapped: true,
+            action_type: s.action_type,
+            target_element: matchedName,
+            original_target: origTarget,
+            matched_catalog: params.matched_from_catalog,
+            match_confidence: conf,
+            input_data: val,
+          };
+        });
+
+        setCsvValidation({
+          valid: true,
+          filename: file.name,
+          total_rows: scenarios.length,
+          valid_rows: scenarios.length,
+          columns: ["Step", "Action", "Target Element", "Nearby Catalog Match", "Input Data", "Status"],
+          scenarios: scenarios,
+        });
+        setSelectedScenarioIds(scenarios.map((s) => s.TC_ID));
+        setCsvMessage(`CSV parsed: ${parsed.steps.length} action step(s). ${parsed.resolved_catalog_elements ?? 0} element(s) matched from catalog.`);
+        addLog(`Action workflow CSV parsed for ${file.name}: ${parsed.steps.length} step(s).`);
         return;
       }
       setRegistryCsvMode(false);
@@ -704,7 +864,14 @@ async function loadTests(projectId?: string) {
     );
 
     try {
-      const response = await startRun({ project_id: activeProjectId, test_ids: selected });
+      const response = await startRun({
+        project_id: activeProjectId,
+        test_ids: selected,
+        headless,
+        browser: browser.toLowerCase(),
+        environment,
+        capture_screenshots: capture,
+      });
       setActiveRunId(response.run_id);
       setRunStatus(response.status);
       addLog(`Run ID: ${response.run_id}`);
@@ -1501,6 +1668,17 @@ async function loadTests(projectId?: string) {
                     {csvExecuting ? <LoaderCircle className="spin" size={16} /> : <Play size={16} />}
                     {csvExecuting ? "Starting…" : `Run selected (${selectedScenarioIds.length})`}
                   </button>
+                  {registryCsvMode && (
+                    <button
+                      className="button button-secondary"
+                      onClick={() => setPage("Workflow Studio")}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, borderColor: "var(--v-accent)", color: "var(--v-accent)" }}
+                      title="Open in Workflow Studio to view, edit, or configure steps visually"
+                    >
+                      <Layers size={16} />
+                      Open in Workflow Studio
+                    </button>
+                  )}
                 </div>
                 {csvError && <div className="csv-message error"><CircleAlert size={16} />{csvError}</div>}
                 {csvMessage && <div className="csv-message success"><CheckCircle2 size={16} />{csvMessage}</div>}
@@ -1586,14 +1764,62 @@ async function loadTests(projectId?: string) {
                       </select>
                     </label>
 
-                    <label className="toggle-line">
-                      <input
-                        type="checkbox"
-                        checked={headless}
-                        onChange={(event) => setHeadless(event.target.checked)}
-                      />
-                      Headless mode
-                    </label>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--v-text-secondary)" }}>Execution Mode</span>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <button
+                          type="button"
+                          onClick={() => setHeadless(false)}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            fontSize: "0.8rem",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                            transition: "all 0.15s ease",
+                            background: !headless ? "rgba(16, 185, 129, 0.12)" : "var(--v-surface-2)",
+                            color: !headless ? "#059669" : "var(--v-text-secondary)",
+                            border: !headless ? "1.5px solid #10b981" : "1px solid var(--v-border)",
+                            boxShadow: !headless ? "0 2px 8px rgba(16, 185, 129, 0.15)" : "none",
+                          }}
+                        >
+                          <span>👁️ Watch Live</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHeadless(true)}
+                          style={{
+                            padding: "8px 10px",
+                            borderRadius: 8,
+                            fontSize: "0.8rem",
+                            fontWeight: 600,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 6,
+                            transition: "all 0.15s ease",
+                            background: headless ? "rgba(99, 102, 241, 0.12)" : "var(--v-surface-2)",
+                            color: headless ? "#6366f1" : "var(--v-text-secondary)",
+                            border: headless ? "1.5px solid #6366f1" : "1px solid var(--v-border)",
+                            boxShadow: headless ? "0 2px 8px rgba(99, 102, 241, 0.15)" : "none",
+                          }}
+                        >
+                          <span>⚡ Headless</span>
+                        </button>
+                      </div>
+                      <div style={{ fontSize: "0.75rem", color: !headless ? "#059669" : "var(--v-text-secondary)", fontWeight: 500, marginTop: 2 }}>
+                        {!headless ? (
+                          <span>🟢 Browser window pops up on your Windows desktop so you can watch actions live.</span>
+                        ) : (
+                          <span>⚡ Fast background execution without visible browser window.</span>
+                        )}
+                      </div>
+                    </div>
 
                     <label className="toggle-line">
                       <input
@@ -1645,11 +1871,10 @@ async function loadTests(projectId?: string) {
                       </button>
                     )}
 
-                    <p className="muted-text">
-                      Note: browser, environment, headless, and screenshot
-                      controls are currently UI preferences. They are not
-                      passed to the runner by the existing API request.
-                    </p>
+                    <div style={{ marginTop: 8, fontSize: "0.74rem", color: "#16a34a", display: "flex", alignItems: "center", gap: 6 }}>
+                      <span>✓</span>
+                      <span>Execution preferences & live browser flags are active.</span>
+                    </div>
                   </div>
                 </section>
 
@@ -1668,15 +1893,33 @@ async function loadTests(projectId?: string) {
                       </div>
                       <code className="run-id">{activeRunId}</code>
 
+                      {running && (
+                        <div className="vq-live-execution-banner">
+                          <div className={headless ? "vq-live-pulse-dot" : "vq-live-pulse-dot-green"} />
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <span style={{ fontSize: "0.82rem", fontWeight: 700, color: "var(--v-text)" }}>
+                              {headless ? "Executing Playwright Automation (High-Speed Headless)..." : "Watching Live Browser Execution on Screen..."}
+                            </span>
+                            <span style={{ fontSize: "0.72rem", color: "var(--v-text-secondary)" }}>
+                              Continuously monitoring real-time browser actions and assertions
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
                       <div className="progress-label">
                         <span>{running ? "Execution active" : "Execution state"}</span>
-                        <span>{progress}%</span>
+                        <span>{running ? "In Progress" : `${progress}%`}</span>
                       </div>
-                      <div className="progress-track">
-                        <div
-                          className="progress-fill"
-                          style={{ width: `${progress}%` }}
-                        />
+                      <div className="progress-track" style={{ overflow: "hidden", position: "relative" }}>
+                        {running ? (
+                          <div className="vq-continuous-progress-bar" />
+                        ) : (
+                          <div
+                            className="progress-fill"
+                            style={{ width: `${progress}%` }}
+                          />
+                        )}
                       </div>
 
                       <div className="run-stat-grid">
@@ -1696,7 +1939,7 @@ async function loadTests(projectId?: string) {
                 </section>
               </div>
 
-              {activeRunId && stepResults.length > 0 && (
+              {activeRunId && (stepResults.length > 0 || running) && (
                 <ScenarioExecutionView
                   runId={activeRunId}
                   stepResults={stepResults}
@@ -2094,14 +2337,51 @@ async function loadTests(projectId?: string) {
                     </select>
                   </label>
 
-                  <label className="toggle-line">
-                    <input
-                      type="checkbox"
-                      checked={headless}
-                      onChange={(event) => setHeadless(event.target.checked)}
-                    />
-                    Headless mode
-                  </label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--v-text-secondary)" }}>Execution Mode</span>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setHeadless(false)}
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          background: !headless ? "rgba(16, 185, 129, 0.12)" : "var(--v-surface-2)",
+                          color: !headless ? "#059669" : "var(--v-text-secondary)",
+                          border: !headless ? "1.5px solid #10b981" : "1px solid var(--v-border)",
+                        }}
+                      >
+                        <span>👁️ Watch Live</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHeadless(true)}
+                        style={{
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          fontSize: "0.78rem",
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          background: headless ? "rgba(99, 102, 241, 0.12)" : "var(--v-surface-2)",
+                          color: headless ? "#6366f1" : "var(--v-text-secondary)",
+                          border: headless ? "1.5px solid #6366f1" : "1px solid var(--v-border)",
+                        }}
+                      >
+                        <span>⚡ Headless</span>
+                      </button>
+                    </div>
+                  </div>
 
                   <label className="toggle-line">
                     <input

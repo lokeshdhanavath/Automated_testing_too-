@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 
 # Project root: C:\Users\lokesh.dhanavath\apex
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TESTS_DIR = (PROJECT_ROOT / "tests").resolve()
 
 router = APIRouter(prefix="/api/scripts", tags=["Test Scripts"])

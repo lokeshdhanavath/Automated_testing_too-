@@ -5,8 +5,53 @@ Supports project-aware browser launch (headless, browser selection),
 conditional screenshot capture, and Playwright video recording.
 """
 import os 
+import sys
 import time
 from datetime import datetime
+
+
+def bring_browser_to_front_windows(browser_type: str = "", page_title: str = ""):
+    """Brings the interactive Playwright browser window to the foreground on Windows desktop."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+
+        keywords = ["chrome", "chromium", "firefox", "edge", "msedge", "webkit", "veriqon", "timesheet", "oracle", "sign in", "hcm"]
+        if browser_type:
+            keywords.append(browser_type.lower())
+        if page_title:
+            clean_t = page_title.strip().lower()
+            if len(clean_t) > 3:
+                keywords.append(clean_t[:25])
+
+        target_hwnds = []
+
+        def enum_cb(hwnd, _):
+            if user32.IsWindowVisible(hwnd):
+                length = user32.GetWindowTextLengthW(hwnd)
+                if length > 0:
+                    buff = ctypes.create_unicode_buffer(length + 1)
+                    user32.GetWindowTextW(hwnd, buff, length + 1)
+                    title = buff.value.lower()
+                    for kw in keywords:
+                        if kw in title:
+                            target_hwnds.append(hwnd)
+                            break
+            return True
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+
+        for hwnd in target_hwnds:
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
+            if hasattr(user32, "SwitchToThisWindow"):
+                user32.SwitchToThisWindow(hwnd, True)
+            user32.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
 from urllib.parse import urlparse, parse_qs
 
 import pytest
@@ -42,20 +87,32 @@ def browser(playwright_instance):
     browser_type_name = config.BROWSER_NAME if config.BROWSER_NAME in ("chromium", "firefox", "webkit") else "chromium"
     browser_type = getattr(playwright_instance, browser_type_name)
 
-    launch_args = []
-    if browser_type_name == "chromium":
+    launch_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+    ]
+    if not config.HEADLESS:
         launch_args.extend([
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
+            "--start-maximized",
+            "--window-position=50,50",
         ])
 
     launch_kwargs = {
         "headless": config.HEADLESS,
         "args": launch_args,
     }
-    if browser_type_name == "chromium":
+    if not config.HEADLESS:
+        launch_kwargs["slow_mo"] = 150
+
+    if browser_type_name in ("chromium", "chrome"):
         try:
             browser = browser_type.launch(**launch_kwargs, channel="chrome")
+        except Exception:
+            browser = browser_type.launch(**launch_kwargs)
+    elif browser_type_name in ("msedge", "edge"):
+        try:
+            browser = browser_type.launch(**launch_kwargs, channel="msedge")
         except Exception:
             browser = browser_type.launch(**launch_kwargs)
     else:
@@ -71,13 +128,17 @@ def browser(playwright_instance):
 @pytest.fixture
 def context(browser, request):
     context_kwargs = {
-        "viewport": {"width": 1400, "height": 900},
         "user_agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
+            "Chrome/131.0.0.0 Safari/537.36"
         ),
+        "ignore_https_errors": True,
     }
+    if not config.HEADLESS and sys.platform == "win32":
+        context_kwargs["no_viewport"] = True
+    else:
+        context_kwargs["viewport"] = {"width": 1400, "height": 900}
 
     if config.CAPTURE_VIDEO:
         config.VIDEO_DIR.mkdir(parents=True, exist_ok=True)
@@ -85,6 +146,7 @@ def context(browser, request):
         context_kwargs["record_video_size"] = {"width": 1280, "height": 720}
 
     ctx = browser.new_context(**context_kwargs)
+    ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     yield ctx
     ctx.close()
 
@@ -93,7 +155,13 @@ def context(browser, request):
 def page(context, request):
     """Fresh page, NOT logged in. Use for login / navigation tests."""
     page = context.new_page()
-    page.set_default_timeout(30000)
+    page.set_default_timeout(45000)
+    if not config.HEADLESS and sys.platform == "win32":
+        try:
+            page.bring_to_front()
+            bring_browser_to_front_windows(config.BROWSER_NAME, "Veriqon")
+        except Exception:
+            pass
 
     start = time.time()
     state_changing = bool(getattr(request.node, "state_changing", False))
@@ -134,13 +202,17 @@ def logged_in_page_obj(browser):
     We capture that token after login and reuse it in every navigation.
     """
     context_kwargs = {
-        "viewport": {"width": 1400, "height": 900},
         "user_agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0.0.0 Safari/537.36"
+            "Chrome/131.0.0.0 Safari/537.36"
         ),
+        "ignore_https_errors": True,
     }
+    if not config.HEADLESS and sys.platform == "win32":
+        context_kwargs["no_viewport"] = True
+    else:
+        context_kwargs["viewport"] = {"width": 1400, "height": 900}
 
     if config.CAPTURE_VIDEO:
         config.VIDEO_DIR.mkdir(parents=True, exist_ok=True)
@@ -148,6 +220,7 @@ def logged_in_page_obj(browser):
         context_kwargs["record_video_size"] = {"width": 1280, "height": 720}
 
     ctx = browser.new_context(**context_kwargs)
+    ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     page = ctx.new_page()
     page.set_default_timeout(30000)
 

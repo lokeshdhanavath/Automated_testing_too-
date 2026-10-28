@@ -1,0 +1,24 @@
+[2026-10-28 10:39:24 UTC] Starting execution for: 'Engine Fixture Test 5baad0' (Run ID: c45c9831-c000-4c8a-9816-cf8cbc1ebd63)
+[2026-10-28 10:39:24 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-28 10:39:24 UTC] Browser: chromium (Headless: False)
+[2026-10-28 10:39:25 UTC] [RUNNING] Step 1: Open HTML fixture (action: navigate)
+[2026-10-28 10:39:26 UTC] Navigating to page path: file:///C:/Users/LOKESH~1.DHA/AppData/Local/Temp/tmpakqdll9g.html
+[2026-10-28 10:39:26 UTC] [PASSED] Step 1 finished in 283ms
+[2026-10-28 10:39:26 UTC] [RUNNING] Step 2: Assert Title (action: assert_title)
+[2026-10-28 10:39:26 UTC] Executing verification: type='page_title', target='', expected='Veriqon Engine Test'
+[2026-10-28 10:39:26 UTC] [PASSED] Step 2 finished in 43ms
+[2026-10-28 10:39:26 UTC] [RUNNING] Step 3: Enter username (action: fill)
+[2026-10-28 10:39:27 UTC] Filling input 'username-input' with value 'admin_user'...
+[2026-10-28 10:39:27 UTC] [PASSED] Step 3 finished in 314ms
+[2026-10-28 10:39:27 UTC] [RUNNING] Step 4: Click button (action: click)
+[2026-10-28 10:39:27 UTC] Clicking element 'login-btn' (click)...
+[2026-10-28 10:39:28 UTC] [PASSED] Step 4 finished in 365ms
+[2026-10-28 10:39:28 UTC] [RUNNING] Step 5: Assert result message (action: assert_text)
+[2026-10-28 10:39:28 UTC] Executing verification: type='contains_text', target='result', expected='Login Success: admin_user'
+[2026-10-28 10:39:28 UTC] [PASSED] Step 5 finished in 101ms
+[2026-10-28 10:39:28 UTC] [RUNNING] Step 6: Capture final screenshot (action: capture_screenshot)
+[2026-10-28 10:39:29 UTC] Custom screenshot captured: step_6_custom.png
+[2026-10-28 10:39:29 UTC] [PASSED] Step 6 finished in 336ms
+[2026-10-28 10:39:41 UTC] Video saved and registered: recording.webm
+[2026-10-28 10:39:41 UTC] Workflow execution completed with status: PASSED
+[2026-10-28 10:39:41 UTC] Summary: 6/6 passed, 0 failed, 0 skipped.

@@ -1,0 +1,16 @@
+Action,Target,Value,Wait,Description
+open_app,,,0,Open application base URL
+login,,,0,Login with vault credentials
+click_element,pt1:_UIScil1u,,0,Click Navigator hamburger menu icon
+click_element,groupNode_workforce_management,,0,Click Workforce Management group
+click_element,itemNode_workforce_management_new_person,,3,Click New Person menu item
+click_element,Hire an Employee,,3,Click Hire an Employee
+select_option,Legal Employer,ABS India Legal Employer 01,3,Select Legal Employer
+fill_input,Last Name,test_035,0,Enter Last Name
+fill_input,First Name,name,0,Enter First Name
+click_element,Next,,3,Click Next
+click_element,Next,,3,Click Next
+select_option,Business Unit,NK UK Business Unit,0,Select Business Unit
+click_element,Next,,3,Click Next
+click_element,Next,,3,Click Next
+click_element,Submit,,3,Click Submit

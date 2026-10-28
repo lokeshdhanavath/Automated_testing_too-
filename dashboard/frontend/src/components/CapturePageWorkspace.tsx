@@ -59,10 +59,22 @@ export const CapturePageWorkspace: React.FC<CapturePageWorkspaceProps> = ({
     activeProject?.browser || "chromium"
   );
 
-  // Target URL input
-  const [targetUrl, setTargetUrl] = useState<string>(
-    activeProject?.base_url || ""
-  );
+  // Target URL input with localStorage persistence
+  const [targetUrl, setTargetUrl] = useState<string>(() => {
+    try {
+      const saved = activeProject?.id ? localStorage.getItem(`veriqon_capture_url_${activeProject.id}`) : null;
+      if (saved) return saved;
+    } catch {}
+    return activeProject?.base_url || "";
+  });
+
+  useEffect(() => {
+    if (activeProject?.id && targetUrl) {
+      try {
+        localStorage.setItem(`veriqon_capture_url_${activeProject.id}`, targetUrl);
+      } catch {}
+    }
+  }, [targetUrl, activeProject?.id]);
   const [isSavingUrl, setIsSavingUrl] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
 
@@ -414,9 +426,10 @@ export const CapturePageWorkspace: React.FC<CapturePageWorkspaceProps> = ({
               >
                 <option value="chromium">Chromium</option>
                 <option value="chrome">Google Chrome</option>
-                <option value="chrome-cdp">Connect to Open Chrome (Port 9222)</option>
+                <option value="msedge">Microsoft Edge</option>
                 <option value="firefox">Firefox</option>
                 <option value="webkit">WebKit (Safari)</option>
+                <option value="chrome-cdp">Connect to Open Chrome (Port 9222)</option>
               </select>
             </div>
           </div>
@@ -501,23 +514,45 @@ export const CapturePageWorkspace: React.FC<CapturePageWorkspaceProps> = ({
 
             <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
               {!isBrowserConnected ? (
-                <button
-                  className="button button-primary capture-main-btn"
-                  onClick={() => void handleLaunchBrowser()}
-                  disabled={browserLoading}
-                >
-                  {browserLoading ? (
-                    <>
-                      <LoaderCircle size={18} className="spinner spin" />
-                      Opening in {selectedBrowser}...
-                    </>
-                  ) : (
-                    <>
-                      <Play size={18} />
-                      Open in {selectedBrowser.toUpperCase()}
-                    </>
-                  )}
-                </button>
+                <>
+                  <button
+                    className="button button-primary capture-main-btn"
+                    onClick={() => void handleLaunchBrowser()}
+                    disabled={browserLoading}
+                  >
+                    {browserLoading ? (
+                      <>
+                        <LoaderCircle size={18} className="spinner spin" />
+                        Opening in {selectedBrowser}...
+                      </>
+                    ) : (
+                      <>
+                        <Play size={18} />
+                        Open in {selectedBrowser.toUpperCase()}
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    className="button button-secondary"
+                    style={{ background: "#0891b2", borderColor: "#06b6d4", color: "#ffffff", fontWeight: 700 }}
+                    onClick={() => void handleDirectCapture()}
+                    disabled={isCapturing || browserLoading}
+                    title="Launch browser and capture all interactive elements on the page"
+                  >
+                    {isCapturing ? (
+                      <>
+                        <LoaderCircle size={16} className="spinner spin" />
+                        Scanning Page...
+                      </>
+                    ) : (
+                      <>
+                        <Camera size={16} />
+                        Capture Active Page
+                      </>
+                    )}
+                  </button>
+                </>
               ) : (
                 <>
                   {/* DIRECT DASHBOARD CAPTURE BUTTON */}
@@ -555,9 +590,15 @@ export const CapturePageWorkspace: React.FC<CapturePageWorkspaceProps> = ({
 
                   <button
                     className="button button-secondary"
-                    onClick={() => void handleLaunchBrowser()}
+                    onClick={async () => {
+                      setCaptureFeedback({
+                        type: "info",
+                        text: `Bringing ${selectedBrowser.toUpperCase()} window to foreground on your Windows desktop...`,
+                      });
+                      await handleLaunchBrowser();
+                    }}
                     disabled={browserLoading}
-                    title="Bring open browser window to the front"
+                    title="Bring open browser window to the front on Windows"
                   >
                     <ExternalLink size={15} />
                     Switch to Browser

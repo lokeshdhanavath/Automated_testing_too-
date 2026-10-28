@@ -1,0 +1,96 @@
+[2026-10-28 09:31:14 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: 3c2ccf79-9eff-45ec-b302-6beeea3365dd)
+[2026-10-28 09:31:14 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 09:31:14 UTC] Browser: chromium (Headless: False)
+[2026-10-28 09:31:14 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-28 09:31:15 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 09:31:16 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 09:31:19 UTC] [PASSED] Step 1 finished in 3578ms
+[2026-10-28 09:31:19 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-28 09:31:24 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-28 09:31:24 UTC] Entering encrypted vault password into password field...
+[2026-10-28 09:31:24 UTC] Submitting login form...
+[2026-10-28 09:31:55 UTC] Waiting for post-login page load...
+[2026-10-28 09:31:55 UTC] [PASSED] Step 2 finished in 35295ms
+[2026-10-28 09:31:55 UTC] [RUNNING] Step 3: Click element (action: click_element)
+[2026-10-28 09:31:55 UTC] Clicking element 'pt1:_UIScil1u' (click)...
+[2026-10-28 09:31:58 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"pt1:_UIScil1u\"], [id$=\":pt1:_UIScil1u\"], [id$=\"_pt1:_UIScil1u\"], [id*=\"pt1:_UIScil1u\"]").first
+    - locator resolved to <a href="#" id="pt1:_UIScil1u" title="Oracle Logo Home" class="xn2 xko p_AFTextOnly" onclick="this.focus();return false;"></a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - performing click action
+    - click action done
+    - waiting for scheduled navigations to finish
+
+[2026-10-28 09:32:01 UTC] [PASSED] Step 3 finished in 5795ms
+[2026-10-28 09:32:01 UTC] [RUNNING] Step 4: Click element (action: click_element)
+[2026-10-28 09:32:01 UTC] Clicking element 'groupNode_workforce_management' (click)...
+[2026-10-28 09:32:04 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"groupNode_workforce_management\"], [id$=\":groupNode_workforce_management\"], [id$=\"_groupNode_workforce_management\"], [id*=\"groupNode_workforce_management\"]").first
+    - locator resolved to <a href="#" tabindex="-1" data-index="6" class="flat-tabs-text" id="groupNode_workforce_management" name="groupNode_workforce_management">My Client Groups</a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - performing click action
+    - click action done
+    - waiting for scheduled navigations to finish
+
+[2026-10-28 09:32:07 UTC] Successfully clicked 'groupNode_workforce_management' via fast interactive DOM resolver.
+[2026-10-28 09:32:08 UTC] [PASSED] Step 4 finished in 6880ms
+[2026-10-28 09:32:08 UTC] [RUNNING] Step 5: Click element (action: click_element)
+[2026-10-28 09:32:08 UTC] Clicking element 'itemNode_workforce_management_new_person' (click)...
+[2026-10-28 09:32:08 UTC] [DEBUG] Immediate locator check failed: Ambiguity detected: locator 'id='itemNode_workforce_management_new_person'' matched 2 visible elements (out of 2 total matching elements). Please specify an accessible role/name, unique label, or more specific selector to avoid unintended actions.
+[2026-10-28 09:32:08 UTC] Successfully clicked 'itemNode_workforce_management_new_person' via fast interactive DOM resolver.
+[2026-10-28 09:32:09 UTC] [PASSED] Step 5 finished in 693ms
+[2026-10-28 09:32:09 UTC] [RUNNING] Step 6: Click element (action: click_element)
+[2026-10-28 09:32:09 UTC] Clicking element 'Hire an Employee' (click)...
+[2026-10-28 09:32:13 UTC] [PASSED] Step 6 finished in 3809ms
+[2026-10-28 09:32:13 UTC] [RUNNING] Step 7: Wait 3 seconds (action: wait)
+[2026-10-28 09:32:13 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:32:16 UTC] [PASSED] Step 7 finished in 3019ms
+[2026-10-28 09:32:16 UTC] [RUNNING] Step 8: Select dropdown option (action: select_option)
+[2026-10-28 09:32:17 UTC] Handling custom dropdown / search-and-select for 'Legal Employer' with target option 'ABS India Legal Employer 01'...
+[2026-10-28 09:32:17 UTC] Focusing and typing search query 'ABS India Legal Employer 01' into combobox 'Legal Employer'...
+[2026-10-28 09:32:18 UTC] Confirming search-and-select with Enter key...
+[2026-10-28 09:32:18 UTC] [PASSED] Step 8 finished in 1096ms
+[2026-10-28 09:32:18 UTC] [RUNNING] Step 9: Fill input field (action: fill_input)
+[2026-10-28 09:32:19 UTC] Filling input 'Last Name' with value 'test_035'...
+[2026-10-28 09:32:19 UTC] [PASSED] Step 9 finished in 210ms
+[2026-10-28 09:32:19 UTC] [RUNNING] Step 10: Wait 3 seconds (action: wait)
+[2026-10-28 09:32:19 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:32:22 UTC] [PASSED] Step 10 finished in 3019ms
+[2026-10-28 09:32:22 UTC] [RUNNING] Step 11: Fill input field (action: fill_input)
+[2026-10-28 09:32:22 UTC] Filling input 'First Name' with value 'name'...
+[2026-10-28 09:32:22 UTC] [PASSED] Step 11 finished in 205ms
+[2026-10-28 09:32:22 UTC] [RUNNING] Step 12: Click element (action: click_element)
+[2026-10-28 09:32:22 UTC] Clicking element 'Next' (click)...
+[2026-10-28 09:32:23 UTC] [PASSED] Step 12 finished in 306ms
+[2026-10-28 09:32:23 UTC] [RUNNING] Step 13: Wait 3 seconds (action: wait)
+[2026-10-28 09:32:23 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:32:26 UTC] [PASSED] Step 13 finished in 3004ms
+[2026-10-28 09:32:26 UTC] [RUNNING] Step 14: Click element (action: click_element)
+[2026-10-28 09:32:26 UTC] Clicking element 'Next' (click)...
+[2026-10-28 09:32:26 UTC] [PASSED] Step 14 finished in 259ms
+[2026-10-28 09:32:26 UTC] [RUNNING] Step 15: Wait 3 seconds (action: wait)
+[2026-10-28 09:32:26 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:32:29 UTC] [PASSED] Step 15 finished in 3016ms
+[2026-10-28 09:32:29 UTC] [RUNNING] Step 16: Select dropdown option (action: select_option)
+[2026-10-28 09:33:00 UTC] Handling custom dropdown / search-and-select for 'Business Unit' with target option 'NK UK Business Unit'...
+[2026-10-28 09:33:30 UTC] Clicking dropdown trigger 'Business Unit' to expand menu...
+[2026-10-28 09:34:30 UTC] [ERROR] Step 16 failed: Locator.click: Timeout 60000ms exceeded.
+Call log:
+  - waiting for get_by_label("Business Unit")
+
+[2026-10-28 09:34:30 UTC] Failure screenshot captured: failure_step_16.png
+[2026-10-28 09:34:30 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-28 09:34:31 UTC] [CANCELLED] Execution stopped by user request.
+[2026-10-28 09:34:32 UTC] Video saved and registered: recording.webm
+[2026-10-28 09:34:32 UTC] Workflow execution completed with status: CANCELLED
+[2026-10-28 09:34:32 UTC] Summary: 15/21 passed, 1 failed, 0 skipped.

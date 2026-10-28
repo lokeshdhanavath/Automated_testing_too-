@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 # Project root: Automated_testing_too-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_SCENARIOS = {
     "TC-001": "tests/test_login.py::test_login_page_loads[chromium]",

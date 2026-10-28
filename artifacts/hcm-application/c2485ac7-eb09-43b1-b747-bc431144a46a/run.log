@@ -1,0 +1,65 @@
+[2026-10-28 12:01:41 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: c2485ac7-eb09-43b1-b747-bc431144a46a)
+[2026-10-28 12:01:41 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 12:01:41 UTC] Browser: chromium (Headless: False)
+[2026-10-28 12:01:41 UTC] Loaded CSV input parameters (5 fields): {'Action': 'open_app', 'Target': '', 'Value': '', 'Wait': '0', 'Description': 'Open application base URL'}
+[2026-10-28 12:01:42 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 12:01:42 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 12:01:45 UTC] [PASSED] Step 1 finished in 3116ms
+[2026-10-28 12:01:45 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-28 12:01:49 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-28 12:01:50 UTC] Entering encrypted vault password into password field...
+[2026-10-28 12:01:50 UTC] Submitting login form...
+[2026-10-28 12:02:21 UTC] Waiting for post-login page load...
+[2026-10-28 12:02:21 UTC] [PASSED] Step 2 finished in 35062ms
+[2026-10-28 12:02:21 UTC] [RUNNING] Step 3: Click Navigator hamburger menu icon (action: click_element)
+[2026-10-28 12:02:21 UTC] Clicking element 'pt1:_UIScil1u' (click)...
+[2026-10-28 12:02:24 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"pt1:_UIScil1u\"], [id$=\":pt1:_UIScil1u\"], [id$=\"_pt1:_UIScil1u\"], [id*=\"pt1:_UIScil1u\"]").filter(has_not=locator("#__veriqon_live_hud_host, #__veriqon_live_hud, [data-playwright-skip]")).first
+    - locator resolved to <a href="#" id="pt1:_UIScil1u" title="Oracle Logo Home" class="xn2 xko p_AFTextOnly" onclick="this.focus();return false;"></a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - performing click action
+    - click action done
+    - waiting for scheduled navigations to finish
+
+[2026-10-28 12:02:30 UTC] Oracle ADF synchronized and glass pane cleared (4905ms).
+[2026-10-28 12:02:30 UTC] Post-action wait: 3000ms (3.0s)
+[2026-10-28 12:02:34 UTC] [PASSED] Step 3 finished in 12786ms
+[2026-10-28 12:02:34 UTC] [RUNNING] Step 4: Click Workforce Management group (action: click_element)
+[2026-10-28 12:02:34 UTC] Clicking element 'groupNode_workforce_management' (click)...
+[2026-10-28 12:02:34 UTC] [PASSED] Step 4 finished in 659ms
+[2026-10-28 12:02:34 UTC] [RUNNING] Step 5: Click New Person menu item (action: click_element)
+[2026-10-28 12:02:35 UTC] Clicking element 'itemNode_workforce_management_new_person' (click)...
+[2026-10-28 12:02:35 UTC] [DEBUG] Immediate locator check failed: Ambiguity detected: locator 'smart='itemNode_workforce_management_new_person'' matched 2 visible elements (out of 2 total matching elements). Please specify an accessible role/name, unique label, or more specific selector to avoid unintended actions.
+[2026-10-28 12:02:35 UTC] Successfully clicked 'itemNode_workforce_management_new_person' via fast interactive DOM resolver.
+[2026-10-28 12:02:37 UTC] Oracle ADF synchronized and glass pane cleared (2032ms).
+[2026-10-28 12:02:37 UTC] Post-action wait: 3000ms (3.0s)
+[2026-10-28 12:02:40 UTC] [PASSED] Step 5 finished in 5894ms
+[2026-10-28 12:02:40 UTC] [RUNNING] Step 6: Click Hire an Employee (action: click_element)
+[2026-10-28 12:02:41 UTC] Clicking element 'Hire an Employee' (click)...
+[2026-10-28 12:02:51 UTC] Post-action wait: 3000ms (3.0s)
+[2026-10-28 12:02:54 UTC] [PASSED] Step 6 finished in 13343ms
+[2026-10-28 12:02:54 UTC] [RUNNING] Step 7: Select Legal Employer (action: select_option)
+[2026-10-28 12:04:02 UTC] Handling custom dropdown / search-and-select for 'Legal Employer' with target option 'ABS India Legal Employer 01'...
+[2026-10-28 12:04:32 UTC] Clicking dropdown trigger 'Legal Employer' to expand menu...
+[2026-10-28 12:05:13 UTC] [ERROR] Step 7 failed: Locator.evaluate: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("text='Legal Employer'")
+
+[2026-10-28 12:05:13 UTC] Failure screenshot captured: failure_step_7.png
+[2026-10-28 12:05:13 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-28 12:05:13 UTC] [SKIPPED] Step 8: Enter Last Name
+[2026-10-28 12:05:13 UTC] [SKIPPED] Step 9: Enter First Name
+[2026-10-28 12:05:13 UTC] [SKIPPED] Step 10: Click Next
+[2026-10-28 12:05:13 UTC] [SKIPPED] Step 11: Click Next
+[2026-10-28 12:05:13 UTC] [SKIPPED] Step 12: Select Business Unit
+[2026-10-28 12:05:13 UTC] [SKIPPED] Step 13: Click Next
+[2026-10-28 12:05:13 UTC] [SKIPPED] Step 14: Click Next
+[2026-10-28 12:05:13 UTC] [SKIPPED] Step 15: Click Submit
+[2026-10-28 12:05:27 UTC] Video saved and registered: recording.webm
+[2026-10-28 12:05:27 UTC] Workflow execution completed with status: FAILED
+[2026-10-28 12:05:27 UTC] Summary: 6/15 passed, 1 failed, 8 skipped.

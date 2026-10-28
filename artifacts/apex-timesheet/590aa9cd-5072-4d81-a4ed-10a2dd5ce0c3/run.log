@@ -1,0 +1,9 @@
+[2026-10-28 05:57:39 UTC] Starting execution for: 'Windows Headless Smoke Test' (Run ID: 590aa9cd-5072-4d81-a4ed-10a2dd5ce0c3)
+[2026-10-28 05:57:39 UTC] Target Application: 'APEX Timesheet' at https://oracleapex.com/ords/r/lokesh354/timesheet-application
+[2026-10-28 05:57:39 UTC] Browser: chromium (Headless: True)
+[2026-10-28 05:57:46 UTC] [RUNNING] Step 1: Navigate to example.com (action: navigate)
+[2026-10-28 05:57:46 UTC] Navigating to page path: https://example.com
+[2026-10-28 05:57:48 UTC] [PASSED] Step 1 finished in 1719ms
+[2026-10-28 05:57:52 UTC] Video saved and registered: recording.webm
+[2026-10-28 05:57:52 UTC] Workflow execution completed with status: PASSED
+[2026-10-28 05:57:52 UTC] Summary: 1/1 passed, 0 failed, 0 skipped.

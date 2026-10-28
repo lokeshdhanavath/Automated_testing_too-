@@ -1,0 +1,63 @@
+[2026-10-28 09:33:00 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: b2dfc9e6-60bd-4c12-9f0d-e340d2c98801)
+[2026-10-28 09:33:00 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 09:33:00 UTC] Browser: chromium (Headless: False)
+[2026-10-28 09:33:00 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-28 09:33:02 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 09:33:02 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 09:33:05 UTC] [PASSED] Step 1 finished in 3084ms
+[2026-10-28 09:33:05 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-28 09:33:10 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-28 09:33:10 UTC] Entering encrypted vault password into password field...
+[2026-10-28 09:33:10 UTC] Submitting login form...
+[2026-10-28 09:33:41 UTC] Waiting for post-login page load...
+[2026-10-28 09:33:41 UTC] [PASSED] Step 2 finished in 35359ms
+[2026-10-28 09:33:41 UTC] [RUNNING] Step 3: Click element (action: click_element)
+[2026-10-28 09:33:41 UTC] Clicking element 'pt1:_UIScil1u' (click)...
+[2026-10-28 09:33:44 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"pt1:_UIScil1u\"], [id$=\":pt1:_UIScil1u\"], [id$=\"_pt1:_UIScil1u\"], [id*=\"pt1:_UIScil1u\"]").first
+    - locator resolved to <a href="#" id="pt1:_UIScil1u" title="Oracle Logo Home" class="xn2 xko p_AFTextOnly" onclick="this.focus();return false;"></a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - performing click action
+    - click action done
+    - waiting for scheduled navigations to finish
+
+[2026-10-28 09:33:45 UTC] [PASSED] Step 3 finished in 4302ms
+[2026-10-28 09:33:45 UTC] [RUNNING] Step 4: Click element (action: click_element)
+[2026-10-28 09:33:45 UTC] Clicking element 'groupNode_workforce_management' (click)...
+[2026-10-28 09:33:46 UTC] [PASSED] Step 4 finished in 481ms
+[2026-10-28 09:33:46 UTC] [RUNNING] Step 5: Click element (action: click_element)
+[2026-10-28 09:33:46 UTC] Clicking element 'itemNode_workforce_management_new_person' (click)...
+[2026-10-28 09:33:46 UTC] [DEBUG] Immediate locator check failed: Ambiguity detected: locator 'id='itemNode_workforce_management_new_person'' matched 2 visible elements (out of 2 total matching elements). Please specify an accessible role/name, unique label, or more specific selector to avoid unintended actions.
+[2026-10-28 09:33:46 UTC] Successfully clicked 'itemNode_workforce_management_new_person' via fast interactive DOM resolver.
+[2026-10-28 09:33:47 UTC] [PASSED] Step 5 finished in 570ms
+[2026-10-28 09:33:47 UTC] [RUNNING] Step 6: Click element (action: click_element)
+[2026-10-28 09:33:47 UTC] Clicking element 'Hire an Employee' (click)...
+[2026-10-28 09:34:57 UTC] [ERROR] Step 6 failed: Locator.wait_for: Timeout 5000ms exceeded.
+Call log:
+  - waiting for get_by_text("Hire an Employee").first
+
+[2026-10-28 09:34:58 UTC] Failure screenshot captured: failure_step_6.png
+[2026-10-28 09:34:58 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 7: Wait 3 seconds
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 8: Select dropdown option
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 9: Wait 3 seconds
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 10: Fill input field
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 11: Fill input field
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 12: Click element
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 13: Wait 3 seconds
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 14: Click element
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 15: Wait 3 seconds
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 16: Select dropdown option
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 17: Click element
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 18: Wait 3 seconds
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 19: Click element
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 20: Wait 3 seconds
+[2026-10-28 09:34:58 UTC] [SKIPPED] Step 21: Click element
+[2026-10-28 09:35:12 UTC] Video saved and registered: recording.webm
+[2026-10-28 09:35:12 UTC] Workflow execution completed with status: FAILED
+[2026-10-28 09:35:12 UTC] Summary: 5/21 passed, 1 failed, 15 skipped.

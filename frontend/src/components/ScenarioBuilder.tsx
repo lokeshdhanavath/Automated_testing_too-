@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   Globe,
   LogIn,
@@ -33,6 +33,7 @@ import {
   MousePointer,
   FileSpreadsheet,
   Upload,
+  GripVertical,
 } from "lucide-react";
 import {
   getProjectScenarios,
@@ -110,9 +111,15 @@ export const REUSABLE_ACTIONS: ActionDef[] = [
   },
   {
     type: "select_option",
-    name: "Select Option",
-    shortDesc: "Selects an item from a dropdown list by label or value.",
+    name: "Select Option / Search & Select",
+    shortDesc: "Select from standard dropdowns or type to search and pick options.",
     icon: ListFilter,
+  },
+  {
+    type: "wait",
+    name: "Wait / Pause",
+    shortDesc: "Pauses execution for a custom duration (in seconds) between actions.",
+    icon: Clock,
   },
   {
     type: "verify_element",
@@ -159,6 +166,8 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
   const [savedWorkflows, setSavedWorkflows] = useState<ScenarioItem[]>([]);
 
   // Workflow builder state with lazy initialization from localStorage
+  const prevProjectIdRef = useRef<string>(projectId);
+
   const [workflowName, setWorkflowName] = useState(() => {
     try {
       return localStorage.getItem(`veriqon_name_${projectId}`) || "Dynamic Browser Workflow";
@@ -197,6 +206,53 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     ];
   });
 
+  // Reload workflow state whenever active project changes
+  useEffect(() => {
+    if (prevProjectIdRef.current !== projectId) {
+      // 1. Reload name for new project
+      try {
+        const savedName = localStorage.getItem(`veriqon_name_${projectId}`);
+        setWorkflowName(savedName || "Dynamic Browser Workflow");
+      } catch {
+        setWorkflowName("Dynamic Browser Workflow");
+      }
+
+      // 2. Reload steps for new project
+      try {
+        const savedSteps = localStorage.getItem(`veriqon_steps_${projectId}`);
+        if (savedSteps) {
+          const parsed = JSON.parse(savedSteps);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setWorkflowSteps(parsed);
+            prevProjectIdRef.current = projectId;
+            return;
+          }
+        }
+      } catch {}
+
+      // Default template for newly opened project
+      setWorkflowSteps([
+        {
+          step_order: 1,
+          action_type: "open_app",
+          description: "Open application base URL",
+          locator_value: "",
+          action_params: {},
+          is_enabled: true,
+        },
+        {
+          step_order: 2,
+          action_type: "login",
+          description: "Login with vault credentials",
+          locator_value: "",
+          action_params: {},
+          is_enabled: true,
+        },
+      ]);
+      prevProjectIdRef.current = projectId;
+    }
+  }, [projectId]);
+
   // Consume any action added from the Capture Page workspace
   useEffect(() => {
     if (pendingAction) {
@@ -218,22 +274,106 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     }
   }, [pendingAction, projectId]);
 
-  // Persist workflow steps and name on changes
+  // Persist workflow steps immediately on any change for current project
   useEffect(() => {
-    try {
-      if (workflowSteps.length > 0) {
+    if (prevProjectIdRef.current === projectId && workflowSteps.length > 0) {
+      try {
         localStorage.setItem(`veriqon_steps_${projectId}`, JSON.stringify(workflowSteps));
-      }
-    } catch {}
+      } catch {}
+    }
   }, [workflowSteps, projectId]);
 
+  // Persist workflow name immediately on change for current project
   useEffect(() => {
-    try {
-      if (workflowName) {
+    if (prevProjectIdRef.current === projectId && workflowName) {
+      try {
         localStorage.setItem(`veriqon_name_${projectId}`, workflowName);
-      }
-    } catch {}
+      } catch {}
+    }
   }, [workflowName, projectId]);
+
+  // Drag and Drop reordering state
+  const [draggedStepIdx, setDraggedStepIdx] = useState<number | null>(null);
+  const [dragOverStepIdx, setDragOverStepIdx] = useState<number | null>(null);
+
+  function handleDragStart(e: React.DragEvent, index: number) {
+    setDraggedStepIdx(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(index));
+  }
+
+  function handleDragOver(e: React.DragEvent, index: number) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverStepIdx !== index) {
+      setDragOverStepIdx(index);
+    }
+  }
+
+  function handleDragEnd() {
+    setDraggedStepIdx(null);
+    setDragOverStepIdx(null);
+  }
+
+  function handleDrop(e: React.DragEvent, targetIndex: number) {
+    e.preventDefault();
+    if (draggedStepIdx === null || draggedStepIdx === targetIndex) {
+      setDraggedStepIdx(null);
+      setDragOverStepIdx(null);
+      return;
+    }
+    const updated = [...workflowSteps];
+    const [movedStep] = updated.splice(draggedStepIdx, 1);
+    updated.splice(targetIndex, 0, movedStep);
+    const reordered = updated.map((s, i) => ({ ...s, step_order: i + 1 }));
+    setWorkflowSteps(reordered);
+    setDraggedStepIdx(null);
+    setDragOverStepIdx(null);
+  }
+
+  function handleChangeStepActionType(newType: string) {
+    const currentTarget = modalStepData.locator_value || "";
+    let newParams: Record<string, any> = { ...modalStepData.action_params };
+    let newDesc = modalStepData.description || "";
+
+    const prevWait = modalStepData.action_params?.wait_after_ms;
+    if (newType === "click_element") {
+      newParams = { click_type: "click" };
+      newDesc = currentTarget ? `Click "${currentTarget}"` : "Click element";
+    } else if (newType === "fill_input") {
+      newParams = { value: modalStepData.action_params?.value || "", clear_first: true };
+      newDesc = currentTarget ? `Fill "${currentTarget}"` : "Fill input field";
+    } else if (newType === "select_option") {
+      newParams = { value: modalStepData.action_params?.value || "", option: modalStepData.action_params?.option || "" };
+      newDesc = currentTarget ? `Select option in "${currentTarget}"` : "Select dropdown option";
+    } else if (newType === "navigate") {
+      newParams = { method: currentTarget.startsWith("/") || currentTarget.startsWith("http") ? "path" : "click" };
+      newDesc = currentTarget ? `Navigate to "${currentTarget}"` : "Navigate to page";
+    } else if (newType === "wait") {
+      const sec = modalStepData.action_params?.seconds || 3;
+      newParams = { seconds: sec, duration_ms: sec * 1000 };
+      newDesc = `Wait ${sec} seconds`;
+    } else if (newType === "verify_element") {
+      newParams = { verify_type: "visible", expected: "" };
+      newDesc = currentTarget ? `Verify "${currentTarget}"` : "Verify element";
+    } else if (newType === "open_app") {
+      newParams = { path: "" };
+      newDesc = "Open application base URL";
+    } else if (newType === "login") {
+      newParams = {};
+      newDesc = "Login with vault credentials";
+    }
+
+    if (prevWait !== undefined && newType !== "wait") {
+      newParams.wait_after_ms = prevWait;
+    }
+    setModalStepData({
+      ...modalStepData,
+      action_type: newType,
+      action_params: newParams,
+      description: newDesc,
+    });
+  }
 
   // Modal / Editing states
   const [editingStepIndex, setEditingStepIndex] = useState<number | null>(null);
@@ -249,8 +389,22 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
   });
   const [showAdvancedLocators, setShowAdvancedLocators] = useState(false);
 
-  // Tab: "steps" vs "csv" vs "pages"
-  const [builderTab, setBuilderTab] = useState<"steps" | "csv" | "pages">("steps");
+  // Tab: "steps" vs "csv" vs "pages" (persisted in localStorage)
+  const [builderTab, setBuilderTab] = useState<"steps" | "csv" | "pages">(() => {
+    try {
+      const saved = localStorage.getItem(`veriqon_buildertab_${projectId}`);
+      if (saved && ["steps", "csv", "pages"].includes(saved)) {
+        return saved as "steps" | "csv" | "pages";
+      }
+    } catch {}
+    return "steps";
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`veriqon_buildertab_${projectId}`, builderTab);
+    } catch {}
+  }, [builderTab, projectId]);
 
   // CSV Data inputs state
   const [csvColumns, setCsvColumns] = useState<string[]>(["Hours", "Task_Name", "Project", "Comments"]);
@@ -297,6 +451,21 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     setCsvColumns(headers);
     setCsvRows(rows);
     setActiveRowIndex(0);
+
+    const hasActionCol = headers.some((h) => /^(action|operation|action_type|which_action)$/i.test(h));
+    if (hasActionCol) {
+      const convertedSteps = convertRowsToSteps(headers, rows);
+      if (convertedSteps.length > 0) {
+        setWorkflowSteps(convertedSteps);
+        setBuilderTab("steps");
+        setStatusMessage({
+          type: "success",
+          text: `Action Workflow CSV detected! Successfully converted ${convertedSteps.length} steps into standard Workflow Steps.`,
+        });
+        return;
+      }
+    }
+
     setStatusMessage({
       type: "success",
       text: `Loaded CSV with ${rows.length} rows and ${headers.length} columns (${headers.join(", ")}).`,
@@ -348,6 +517,79 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     setCsvRows(csvRows.map((r) => ({ ...r, [cleanCol]: "" })));
   }
 
+  function convertRowsToSteps(headers: string[], rows: Record<string, string>[]): ScenarioStep[] {
+    const actionKey = headers.find((c) => /^(action|operation|step_action|command)$/i.test(c)) || "Action";
+    const targetKey = headers.find((c) => /^(target|target_element|element|locator|field)$/i.test(c)) || "Target";
+    const valueKey = headers.find((c) => /^(value|input|data|text|input_data)$/i.test(c)) || "Value";
+    const waitKey = headers.find((c) => /^(wait|delay|pause|sleep|wait_after)$/i.test(c)) || "Wait";
+    const descKey = headers.find((c) => /^(description|desc|name|scenario)$/i.test(c)) || "Description";
+
+    const newSteps: ScenarioStep[] = [];
+    rows.forEach((row) => {
+      const rawAct = (row[actionKey] || "").trim().toLowerCase();
+      if (!rawAct) return;
+      const cleanAct = rawAct.replace(/[\s\-]+/g, "_");
+      const targetVal = (row[targetKey] || "").trim();
+      const inputVal = (row[valueKey] || "").trim();
+      const rawWait = (row[waitKey] || "").trim();
+      const descVal = (row[descKey] || "").trim();
+
+      const waitSec = parseFloat(rawWait.replace(/[^\d\.]/g, "")) || 0;
+      const waitMs = Math.round(waitSec * 1000);
+
+      let actionType = cleanAct;
+      let params: Record<string, any> = { value: inputVal, wait_after_ms: waitMs };
+      let locVal = targetVal;
+      let locType = "smart";
+
+      if (cleanAct === "open_app" || cleanAct === "open" || cleanAct === "url") {
+        actionType = "open_app";
+        params = { path: inputVal || targetVal || "", wait_after_ms: waitMs };
+      } else if (cleanAct === "login" || cleanAct === "sign_in") {
+        actionType = "login";
+        params = { wait_after_ms: waitMs };
+      } else if (cleanAct === "click" || cleanAct === "click_element") {
+        actionType = "click_element";
+        params = { click_type: "click", wait_after_ms: waitMs };
+      } else if (cleanAct === "fill" || cleanAct === "fill_input" || cleanAct === "input" || cleanAct === "type") {
+        actionType = "fill_input";
+        params = { value: inputVal, clear_first: true, wait_after_ms: waitMs };
+      } else if (cleanAct === "select" || cleanAct === "select_option" || cleanAct === "choose") {
+        actionType = "select_option";
+        params = { value: inputVal, option: inputVal, wait_after_ms: waitMs };
+      } else if (cleanAct.startsWith("wait") || cleanAct.startsWith("pause") || cleanAct.startsWith("sleep")) {
+        actionType = "wait";
+        const durSec = waitSec || parseFloat(inputVal) || parseFloat(targetVal) || 3;
+        params = { seconds: durSec, duration_ms: durSec * 1000, wait_after_ms: 0 };
+        locVal = "";
+      }
+
+      newSteps.push({
+        step_order: newSteps.length + 1,
+        action_type: actionType,
+        locator_type: locType,
+        locator_value: locVal,
+        action_params: params,
+        description: descVal || `Execute ${actionType} on ${locVal || "element"}`,
+        is_enabled: true,
+      });
+    });
+    return newSteps;
+  }
+
+  function handleConvertCsvTableToWorkflowSteps() {
+    if (csvRows.length === 0) return;
+    const steps = convertRowsToSteps(csvColumns, csvRows);
+    if (steps.length > 0) {
+      setWorkflowSteps(steps);
+      setBuilderTab("steps");
+      setStatusMessage({
+        type: "success",
+        text: `Converted ${steps.length} CSV rows into standard Workflow Steps! You can now run or edit them.`,
+      });
+    }
+  }
+
   function handleClearCsv() {
     if (window.confirm("Are you sure you want to clear all CSV data?")) {
       setCsvColumns([]);
@@ -364,7 +606,33 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
   // Element Discovery / Catalog states
   const [showCatalog, setShowCatalog] = useState(false);
   const [catalogTarget, setCatalogTarget] = useState<"username" | "password" | "submit" | "navigate" | "main" | null>(null);
-  const [headlessMode, setHeadlessMode] = useState<boolean>(true);
+  const [headlessMode, setHeadlessMode] = useState<boolean>(false);
+
+  function handleExportActionsToCsv() {
+    if (workflowSteps.length === 0) {
+      alert("No workflow steps to export.");
+      return;
+    }
+    const headers = ["Action", "Target", "Value", "Wait", "Description"];
+    const rows = workflowSteps.map((s) => {
+      const waitSec =
+        s.action_type === "wait"
+          ? (s.action_params?.seconds ?? (s.action_params?.duration_ms ? s.action_params.duration_ms / 1000 : 3))
+          : (s.action_params?.wait_after_ms ? Number(s.action_params.wait_after_ms) / 1000 : 0);
+      const val = s.action_params?.value || s.action_params?.option || "";
+      const tgt = s.locator_value || s.action_params?.path || "";
+      const desc = s.description || "";
+      return [s.action_type, tgt, val, waitSec, desc].map((f) => `"${String(f).replace(/"/g, '""')}"`).join(",");
+    });
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${(workflowName || "workflow").toLowerCase().replace(/[^a-z0-9_]+/g, "_")}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   async function handleImportActionsFromCsv(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -378,6 +646,7 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
         return;
       }
       setWorkflowSteps((prev) => [...prev, ...parsed.steps]);
+      setBuilderTab("steps");
       const matchedCount = parsed.steps.filter((s: any) => s.action_params?.matched_from_catalog).length;
       setStatusMessage({
         type: "success",
@@ -523,6 +792,9 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
     } else if (actionType === "select_option") {
       initialParams = { value: "" };
       initialDesc = "Select dropdown option";
+    } else if (actionType === "wait") {
+      initialParams = { seconds: 3, duration_ms: 3000 };
+      initialDesc = "Wait 3 seconds";
     } else if (actionType === "verify_element") {
       initialParams = { verify_type: "visible", expected: "" };
       initialDesc = "Verify element visibility";
@@ -1283,6 +1555,17 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
               <FileSpreadsheet size={15} />
               Import Actions from CSV
             </button>
+            <button
+              type="button"
+              className="button button-secondary button-small"
+              onClick={handleExportActionsToCsv}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 600 }}
+              title="Export current workflow steps to a CSV file (including post-action wait delays)"
+              disabled={workflowSteps.length === 0}
+            >
+              <FileSpreadsheet size={15} />
+              Export to CSV
+            </button>
           </div>
         </div>
 
@@ -1411,10 +1694,28 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
               return (
                 <div
                   key={idx}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, idx)}
+                  onDragOver={(e) => handleDragOver(e, idx)}
+                  onDrop={(e) => handleDrop(e, idx)}
+                  onDragEnd={handleDragEnd}
                   className={`sb-step-card ${!step.is_enabled ? "disabled" : ""}`}
+                  style={{
+                    transition: "all 0.15s ease",
+                    cursor: "grab",
+                    ...(draggedStepIdx === idx ? { opacity: 0.4, border: "2px dashed var(--v-primary)", background: "rgba(99, 102, 241, 0.05)" } : {}),
+                    ...(dragOverStepIdx === idx && draggedStepIdx !== idx ? { borderTop: "3px solid var(--v-primary)", background: "rgba(99, 102, 241, 0.08)" } : {}),
+                  }}
                 >
-                  {/* Left: Step Number, Icon, Title, and Concise Summary */}
-                  <div className="sb-step-left">
+                  {/* Left: Drag Handle, Step Number, Icon, Title, and Concise Summary */}
+                  <div className="sb-step-left" onClick={() => handleEditStep(idx)} style={{ cursor: "pointer" }}>
+                    <div
+                      className="sb-drag-handle"
+                      title="Click and drag to reorder this step's position in the workflow"
+                      style={{ cursor: "grab", padding: "2px 4px", color: "var(--v-text-muted)", display: "flex", alignItems: "center" }}
+                    >
+                      <GripVertical size={16} />
+                    </div>
                     <span className="sb-step-num">{idx + 1}</span>
 
                     <div className="sb-step-icon">
@@ -1467,9 +1768,44 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                             {step.action_params?.expected && ` "${step.action_params.expected}"`}
                           </span>
                         )}
+                        {step.action_type === "wait" && (
+                          <span>
+                            Pause Duration:{" "}
+                            <strong style={{ color: "var(--v-text)" }}>
+                              {step.action_params?.seconds !== undefined
+                                ? `${step.action_params.seconds}s`
+                                : step.action_params?.duration_ms
+                                ? `${step.action_params.duration_ms / 1000}s`
+                                : "3s"}
+                            </strong>
+                            {" "}
+                            ({step.action_params?.duration_ms || ((step.action_params?.seconds || 3) * 1000)}ms)
+                          </span>
+                        )}
                         {step.action_type === "wait_for_element" && (
                           <span>
                             Condition: {step.action_params?.condition === "duration" ? `${step.action_params?.duration_ms || 1000}ms` : step.action_params?.condition || "visible"}
+                          </span>
+                        )}
+                        {step.action_type !== "wait" && Number(step.action_params?.wait_after_ms || 0) > 0 && (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              marginLeft: 8,
+                              padding: "1px 6px",
+                              background: "rgba(99, 102, 241, 0.15)",
+                              border: "1px solid rgba(99, 102, 241, 0.35)",
+                              borderRadius: 4,
+                              fontSize: "0.7rem",
+                              color: "#818cf8",
+                              fontWeight: 600,
+                            }}
+                            title={`Waits ${(Number(step.action_params?.wait_after_ms || 0) / 1000)}s after executing this action`}
+                          >
+                            <Clock size={11} />
+                            +{(Number(step.action_params?.wait_after_ms || 0) / 1000)}s wait
                           </span>
                         )}
                       </div>
@@ -1616,6 +1952,55 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                 Provide test input values using CSV columns. In any action step, reference variables using <code>{"{{ColumnName}}"}</code> (e.g. <code>{"{{Hours}}"}</code>).
               </p>
             </div>
+
+          {csvColumns.some((c) => /^(action|operation|action_type|which_action)$/i.test(c)) && (
+            <div
+              style={{
+                width: "100%",
+                background: "linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(168, 85, 247, 0.08))",
+                border: "1px solid rgba(99, 102, 241, 0.35)",
+                borderRadius: 8,
+                padding: "12px 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexWrap: "wrap",
+                gap: 12,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <Sparkles size={20} style={{ color: "var(--v-accent, #6366f1)", flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: "0.88rem", color: "var(--v-text)" }}>
+                    Action Workflow Detected ({csvRows.length} action steps)
+                  </div>
+                  <div style={{ fontSize: "0.76rem", color: "var(--v-text-secondary)", marginTop: 2 }}>
+                    This CSV contains step actions (<code>open_app</code>, <code>login</code>, <code>click_element</code>, <code>fill_input</code>, etc.). Convert them into standard Workflow Steps to run and edit them!
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  className="button button-primary button-small"
+                  onClick={handleConvertCsvTableToWorkflowSteps}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 700 }}
+                >
+                  <Layers size={14} />
+                  Convert to Workflow Steps ({csvRows.length})
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => setBuilderTab("steps")}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                >
+                  View Workflow Steps ({workflowSteps.length})
+                </button>
+              </div>
+            </div>
+          )}
 
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               {/* Hidden file input */}
@@ -1936,6 +2321,28 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
 
             {/* Modal Body: Action-Specific Form Fields */}
             <div style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: "60vh", overflowY: "auto", paddingRight: 4 }}>
+              {/* Action Type Switcher (Edit Action Feature) */}
+              <div style={{ background: "var(--v-surface-raised, rgba(255,255,255,0.03))", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--v-border)", display: "flex", flexDirection: "column", gap: 6 }}>
+                <label className="sb-label" style={{ marginBottom: 0 }}>Action Type (Change / Switch)</label>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <select
+                    value={modalStepData.action_type}
+                    onChange={(e) => handleChangeStepActionType(e.target.value)}
+                    className="sb-input"
+                    style={{ fontWeight: 700, fontSize: "0.92rem", flex: 1 }}
+                  >
+                    {REUSABLE_ACTIONS.map((a) => (
+                      <option key={a.type} value={a.type}>
+                        {a.name} ({a.type})
+                      </option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: "0.75rem", color: "var(--v-text-muted)", whiteSpace: "nowrap" }}>
+                    Change action type
+                  </span>
+                </div>
+              </div>
+
               {/* Step Description */}
               <div>
                 <label className="sb-label">Step Description</label>
@@ -2651,7 +3058,7 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                   )}
 
                   <div>
-                    <label className="sb-label">Dropdown Field Name or Selector <b>*</b></label>
+                    <label className="sb-label">Dropdown / Search & Select Field Name or Selector <b>*</b></label>
                     <input
                       type="text"
                       required
@@ -2663,7 +3070,7 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                   </div>
 
                   <div>
-                    <label className="sb-label">Option to Select <b>*</b></label>
+                    <label className="sb-label">Option to Select / Search For <b>*</b></label>
                     {modalStepData.action_params?.available_options && modalStepData.action_params.available_options.length > 0 ? (
                       <select
                         value={modalStepData.action_params?.value || ""}
@@ -2817,6 +3224,104 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                         />
                       </div>
                     )}
+                </div>
+              )}
+
+              {/* ACTION: Wait / Pause Execution */}
+              {modalStepData.action_type === "wait" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  <div>
+                    <label className="sb-label">Wait Duration (seconds) <b>*</b></label>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <input
+                        type="number"
+                        min="0.1"
+                        max="300"
+                        step="0.5"
+                        value={
+                          modalStepData.action_params?.seconds !== undefined
+                            ? modalStepData.action_params.seconds
+                            : (modalStepData.action_params?.duration_ms || 3000) / 1000
+                        }
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 1;
+                          setModalStepData({
+                            ...modalStepData,
+                            description: `Wait ${val} second${val !== 1 ? 's' : ''}`,
+                            action_params: {
+                              ...modalStepData.action_params,
+                              seconds: val,
+                              duration_ms: Math.round(val * 1000),
+                              value: String(val),
+                            },
+                          });
+                        }}
+                        className="sb-input"
+                        style={{ maxWidth: 160, fontWeight: 700, fontSize: "1rem" }}
+                      />
+                      <span style={{ fontSize: "0.85rem", color: "var(--v-text-muted)", fontWeight: 600 }}>
+                        seconds ({(modalStepData.action_params?.seconds || (modalStepData.action_params?.duration_ms || 3000) / 1000) * 1000} ms)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="sb-label" style={{ marginBottom: 6 }}>Quick Presets</label>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {[1, 2, 3, 5, 10, 15].map((presetSec) => {
+                        const curSec =
+                          modalStepData.action_params?.seconds !== undefined
+                            ? modalStepData.action_params.seconds
+                            : (modalStepData.action_params?.duration_ms || 3000) / 1000;
+                        const isSelected = curSec === presetSec;
+                        return (
+                          <button
+                            key={presetSec}
+                            type="button"
+                            onClick={() =>
+                              setModalStepData({
+                                ...modalStepData,
+                                description: `Wait ${presetSec} second${presetSec !== 1 ? 's' : ''}`,
+                                action_params: {
+                                  ...modalStepData.action_params,
+                                  seconds: presetSec,
+                                  duration_ms: presetSec * 1000,
+                                  value: String(presetSec),
+                                },
+                              })
+                            }
+                            className={`badge ${isSelected ? 'badge-primary' : 'badge-secondary'}`}
+                            style={{
+                              padding: "6px 14px",
+                              cursor: "pointer",
+                              fontSize: "0.82rem",
+                              fontWeight: isSelected ? 700 : 500,
+                              borderRadius: 6,
+                              border: isSelected ? "1px solid var(--v-primary)" : "1px solid var(--v-border)",
+                              background: isSelected ? "var(--v-primary)" : "var(--v-surface-raised, rgba(255,255,255,0.04))",
+                              color: isSelected ? "#fff" : "var(--v-text)",
+                            }}
+                          >
+                            ⏱️ {presetSec}s
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "rgba(99, 102, 241, 0.08)",
+                      border: "1px solid rgba(99, 102, 241, 0.2)",
+                      borderRadius: 8,
+                      padding: "10px 14px",
+                      fontSize: "0.8rem",
+                      color: "var(--v-text-secondary)",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    💡 <strong>Custom Wait Step:</strong> Execution will pause for this duration before proceeding to the subsequent action. No selector or element is required.
+                  </div>
                 </div>
               )}
 
@@ -2986,6 +3491,107 @@ export const ScenarioBuilder: React.FC<ScenarioBuilderProps> = ({
                       </p>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Universal Post-Action Wait / Delay (Default: No wait / 0s) */}
+              {modalStepData.action_type !== "wait" && (
+                <div
+                  style={{
+                    background: "var(--v-surface-raised, rgba(255, 255, 255, 0.03))",
+                    borderRadius: 8,
+                    padding: "12px 14px",
+                    border: "1px solid var(--v-border)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <label className="sb-label" style={{ margin: 0, display: "flex", alignItems: "center", gap: 6, fontWeight: 700 }}>
+                      <Clock size={14} style={{ color: "var(--v-accent, #6366f1)" }} />
+                      <span>Wait After This Action (Delay)</span>
+                    </label>
+                    <span style={{ fontSize: "0.72rem", color: "var(--v-text-muted)" }}>
+                      Default: 0s (no wait)
+                    </span>
+                  </div>
+
+                  <p style={{ margin: 0, fontSize: "0.74rem", color: "var(--v-text-secondary)", lineHeight: 1.3 }}>
+                    Specify how long to pause right after executing this step. Eliminates the need for separate wait actions.
+                  </p>
+
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 2 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max="120"
+                        step="0.5"
+                        value={
+                          modalStepData.action_params?.wait_after_ms !== undefined
+                            ? (Number(modalStepData.action_params.wait_after_ms) / 1000)
+                            : 0
+                        }
+                        onChange={(e) => {
+                          const val = Math.max(0, parseFloat(e.target.value) || 0);
+                          setModalStepData({
+                            ...modalStepData,
+                            action_params: {
+                              ...modalStepData.action_params,
+                              wait_after_ms: Math.round(val * 1000),
+                            },
+                          });
+                        }}
+                        className="sb-input"
+                        style={{ width: 85, padding: "5px 8px", fontSize: "0.86rem", textAlign: "center", fontWeight: 700 }}
+                      />
+                      <span style={{ fontSize: "0.78rem", color: "var(--v-text-secondary)" }}>seconds</span>
+                    </div>
+
+                    {/* Quick Preset Buttons */}
+                    <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                      {[
+                        { label: "0s (None)", sec: 0 },
+                        { label: "1s", sec: 1 },
+                        { label: "2s", sec: 2 },
+                        { label: "3s", sec: 3 },
+                        { label: "5s", sec: 5 },
+                      ].map((preset) => {
+                        const currentSec = (Number(modalStepData.action_params?.wait_after_ms) || 0) / 1000;
+                        const isSelected = currentSec === preset.sec;
+                        return (
+                          <button
+                            key={preset.sec}
+                            type="button"
+                            onClick={() => {
+                              setModalStepData({
+                                ...modalStepData,
+                                action_params: {
+                                  ...modalStepData.action_params,
+                                  wait_after_ms: preset.sec * 1000,
+                                },
+                              });
+                            }}
+                            style={{
+                              background: isSelected ? "var(--v-accent, #6366f1)" : "rgba(255,255,255,0.06)",
+                              color: isSelected ? "#fff" : "var(--v-text-secondary)",
+                              border: "1px solid",
+                              borderColor: isSelected ? "var(--v-accent, #6366f1)" : "var(--v-border)",
+                              borderRadius: 4,
+                              padding: "4px 8px",
+                              fontSize: "0.72rem",
+                              fontWeight: isSelected ? 700 : 400,
+                              cursor: "pointer",
+                              transition: "all 0.15s ease",
+                            }}
+                          >
+                            {preset.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

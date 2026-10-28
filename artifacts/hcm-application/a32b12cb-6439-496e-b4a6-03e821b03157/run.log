@@ -1,0 +1,98 @@
+[2026-10-28 09:36:23 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: a32b12cb-6439-496e-b4a6-03e821b03157)
+[2026-10-28 09:36:23 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 09:36:23 UTC] Browser: chromium (Headless: False)
+[2026-10-28 09:36:23 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-28 09:36:25 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 09:36:25 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 09:36:28 UTC] [PASSED] Step 1 finished in 2985ms
+[2026-10-28 09:36:28 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-28 09:36:33 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-28 09:36:33 UTC] Entering encrypted vault password into password field...
+[2026-10-28 09:36:33 UTC] Submitting login form...
+[2026-10-28 09:37:04 UTC] Waiting for post-login page load...
+[2026-10-28 09:37:04 UTC] [PASSED] Step 2 finished in 35317ms
+[2026-10-28 09:37:04 UTC] [RUNNING] Step 3: Click element (action: click_element)
+[2026-10-28 09:37:04 UTC] Clicking element 'pt1:_UIScil1u' (click)...
+[2026-10-28 09:37:07 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"pt1:_UIScil1u\"], [id$=\":pt1:_UIScil1u\"], [id$=\"_pt1:_UIScil1u\"], [id*=\"pt1:_UIScil1u\"]").first
+    - locator resolved to <a href="#" id="pt1:_UIScil1u" title="Oracle Logo Home" class="xn2 xko p_AFTextOnly" onclick="this.focus();return false;"></a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - performing click action
+    - click action done
+    - waiting for scheduled navigations to finish
+
+[2026-10-28 09:37:09 UTC] Successfully clicked 'pt1:_UIScil1u' via fast interactive DOM resolver.
+[2026-10-28 09:37:09 UTC] [PASSED] Step 3 finished in 5065ms
+[2026-10-28 09:37:09 UTC] [RUNNING] Step 4: Click element (action: click_element)
+[2026-10-28 09:37:09 UTC] Clicking element 'groupNode_workforce_management' (click)...
+[2026-10-28 09:37:10 UTC] [PASSED] Step 4 finished in 567ms
+[2026-10-28 09:37:10 UTC] [RUNNING] Step 5: Click element (action: click_element)
+[2026-10-28 09:37:10 UTC] Clicking element 'itemNode_workforce_management_new_person' (click)...
+[2026-10-28 09:37:10 UTC] [DEBUG] Immediate locator check failed: Ambiguity detected: locator 'id='itemNode_workforce_management_new_person'' matched 2 visible elements (out of 2 total matching elements). Please specify an accessible role/name, unique label, or more specific selector to avoid unintended actions.
+[2026-10-28 09:37:10 UTC] Successfully clicked 'itemNode_workforce_management_new_person' via fast interactive DOM resolver.
+[2026-10-28 09:37:11 UTC] [PASSED] Step 5 finished in 592ms
+[2026-10-28 09:37:11 UTC] [RUNNING] Step 6: Wait 3 seconds (action: wait)
+[2026-10-28 09:37:11 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:37:14 UTC] [PASSED] Step 6 finished in 3028ms
+[2026-10-28 09:37:14 UTC] [RUNNING] Step 7: Click element (action: click_element)
+[2026-10-28 09:37:14 UTC] Clicking element 'Hire an Employee' (click)...
+[2026-10-28 09:37:15 UTC] [PASSED] Step 7 finished in 1181ms
+[2026-10-28 09:37:15 UTC] [RUNNING] Step 8: Wait 3 seconds (action: wait)
+[2026-10-28 09:37:15 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:37:18 UTC] [PASSED] Step 8 finished in 3032ms
+[2026-10-28 09:37:18 UTC] [RUNNING] Step 9: Select dropdown option (action: select_option)
+[2026-10-28 09:37:19 UTC] Handling custom dropdown / search-and-select for 'Legal Employer' with target option 'ABS India Legal Employer 01'...
+[2026-10-28 09:37:19 UTC] Focusing and typing search query 'ABS India Legal Employer 01' into combobox 'Legal Employer'...
+[2026-10-28 09:37:19 UTC] Confirming search-and-select with Enter key...
+[2026-10-28 09:37:20 UTC] [PASSED] Step 9 finished in 1087ms
+[2026-10-28 09:37:20 UTC] [RUNNING] Step 10: Wait 3 seconds (action: wait)
+[2026-10-28 09:37:20 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:37:23 UTC] [PASSED] Step 10 finished in 3005ms
+[2026-10-28 09:37:23 UTC] [RUNNING] Step 11: Fill input field (action: fill_input)
+[2026-10-28 09:37:23 UTC] Filling input 'Last Name' with value 'test_035'...
+[2026-10-28 09:37:23 UTC] [PASSED] Step 11 finished in 271ms
+[2026-10-28 09:37:23 UTC] [RUNNING] Step 12: Fill input field (action: fill_input)
+[2026-10-28 09:37:23 UTC] Filling input 'First Name' with value 'name'...
+[2026-10-28 09:37:24 UTC] [PASSED] Step 12 finished in 288ms
+[2026-10-28 09:37:24 UTC] [RUNNING] Step 13: Click element (action: click_element)
+[2026-10-28 09:37:24 UTC] Clicking element 'Next' (click)...
+[2026-10-28 09:37:24 UTC] [PASSED] Step 13 finished in 291ms
+[2026-10-28 09:37:24 UTC] [RUNNING] Step 14: Wait 3 seconds (action: wait)
+[2026-10-28 09:37:24 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:37:27 UTC] [PASSED] Step 14 finished in 3002ms
+[2026-10-28 09:37:27 UTC] [RUNNING] Step 15: Click element (action: click_element)
+[2026-10-28 09:37:28 UTC] Clicking element 'Next' (click)...
+[2026-10-28 09:37:28 UTC] [PASSED] Step 15 finished in 371ms
+[2026-10-28 09:37:28 UTC] [RUNNING] Step 16: Wait 3 seconds (action: wait)
+[2026-10-28 09:37:28 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:37:31 UTC] [PASSED] Step 16 finished in 3010ms
+[2026-10-28 09:37:31 UTC] [RUNNING] Step 17: Select dropdown option (action: select_option)
+[2026-10-28 09:37:37 UTC] Handling custom dropdown / search-and-select for 'Business Unit' with target option 'NK UK Business Unit'...
+[2026-10-28 09:37:37 UTC] Focusing and typing search query 'NK UK Business Unit' into combobox 'Business Unit'...
+[2026-10-28 09:37:38 UTC] Confirming search-and-select with Enter key...
+[2026-10-28 09:37:38 UTC] [PASSED] Step 17 finished in 7172ms
+[2026-10-28 09:37:38 UTC] [RUNNING] Step 18: Click element (action: click_element)
+[2026-10-28 09:37:39 UTC] Clicking element 'Next' (click)...
+[2026-10-28 09:37:39 UTC] [PASSED] Step 18 finished in 846ms
+[2026-10-28 09:37:39 UTC] [RUNNING] Step 19: Wait 3 seconds (action: wait)
+[2026-10-28 09:37:40 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:37:43 UTC] [PASSED] Step 19 finished in 3024ms
+[2026-10-28 09:37:43 UTC] [RUNNING] Step 20: Click element (action: click_element)
+[2026-10-28 09:37:43 UTC] Clicking element 'Next' (click)...
+[2026-10-28 09:37:43 UTC] [DEBUG] Immediate locator check failed: Ambiguity detected: locator 'text='Next'' matched 2 visible elements (out of 4 total matching elements). Please specify an accessible role/name, unique label, or more specific selector to avoid unintended actions.
+[2026-10-28 09:37:43 UTC] Successfully clicked 'Next' via fast interactive DOM resolver.
+[2026-10-28 09:37:44 UTC] [PASSED] Step 20 finished in 804ms
+[2026-10-28 09:37:44 UTC] [RUNNING] Step 21: Wait 3 seconds (action: wait)
+[2026-10-28 09:37:44 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 09:37:47 UTC] [PASSED] Step 21 finished in 3009ms
+[2026-10-28 09:37:47 UTC] [RUNNING] Step 22: Click element (action: click_element)
+[2026-10-28 09:37:47 UTC] Clicking element 'Submit' (click)...
+[2026-10-28 09:37:48 UTC] [PASSED] Step 22 finished in 1006ms
+[2026-10-28 09:37:49 UTC] Video saved and registered: recording.webm
+[2026-10-28 09:37:49 UTC] Workflow execution completed with status: PASSED
+[2026-10-28 09:37:49 UTC] Summary: 22/22 passed, 0 failed, 0 skipped.

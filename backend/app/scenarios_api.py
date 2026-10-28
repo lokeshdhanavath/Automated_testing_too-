@@ -22,7 +22,7 @@ from app import scenario_engine
 
 router = APIRouter(prefix="/api", tags=["Scenarios & Credentials"])
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS_ROOT = PROJECT_ROOT / "artifacts"
 
 
@@ -423,7 +423,7 @@ def trigger_scenario_run(scenario_id: str, payload: ScenarioRunPayload):
             except Exception:
                 pass
 
-        # If still none, check if project specifies custom environment variable names
+        # If still none, check if project specifies custom environment variable names or default app env vars
         if not decrypted_cred:
             user_env = project.get("username_env_var")
             pass_env = project.get("password_env_var")
@@ -432,6 +432,14 @@ def trigger_scenario_run(scenario_id: str, payload: ScenarioRunPayload):
                     "username": os.getenv(user_env, ""),
                     "secret": os.getenv(pass_env, "") if pass_env else "",
                 }
+            else:
+                default_u = os.getenv("APP_USERNAME") or os.getenv("APEX_USERNAME")
+                default_p = os.getenv("APP_PASSWORD") or os.getenv("APEX_PASSWORD")
+                if default_u and default_p:
+                    decrypted_cred = {
+                        "username": default_u,
+                        "secret": default_p,
+                    }
 
         # Resolve dataset row if specified
         dataset_row = None
@@ -575,6 +583,14 @@ def trigger_dynamic_workflow_run(project_id: str, payload: DynamicWorkflowPayloa
                     "username": os.getenv(user_env, ""),
                     "secret": os.getenv(pass_env, "") if pass_env else "",
                 }
+            else:
+                default_u = os.getenv("APP_USERNAME") or os.getenv("APEX_USERNAME")
+                default_p = os.getenv("APP_PASSWORD") or os.getenv("APEX_PASSWORD")
+                if default_u and default_p:
+                    decrypted_cred = {
+                        "username": default_u,
+                        "secret": default_p,
+                    }
 
         # Build steps representation
         steps_dicts = []

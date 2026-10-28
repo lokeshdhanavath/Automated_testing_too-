@@ -12,6 +12,13 @@ from pathlib import Path
 from threading import Lock, Thread
 from typing import Any
 
+if sys.platform == "win32":
+    import asyncio
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
+
 # Ensure backend directory and project root are always on sys.path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BACKEND_DIR.parent.parent
@@ -948,7 +955,7 @@ def start_run(request: RunRequest):
             "json_report": None,
             "test_file": request.test_file,
             "test_ids": request.test_ids,
-            "junit_report": str(ARTIFACTS_ROOT / project["external_id"] / run_id / "reports" / "xml" / f"{run_id}.xml"),
+            "junit_report": str((ARTIFACTS_ROOT / project["external_id"] / run_id / "reports" / "xml" / f"{run_id}.xml").as_posix()),
         }
         active_run_id = run_id
 

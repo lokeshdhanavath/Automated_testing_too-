@@ -1,0 +1,16 @@
+[2026-10-28 06:59:39 UTC] Starting execution for: 'Diagnostic Verification Test' (Run ID: fa85a214-7888-43ca-8a3a-8a22ad2fa9fe)
+[2026-10-28 06:59:39 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 06:59:39 UTC] Browser: chromium (Headless: True)
+[2026-10-28 06:59:40 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 06:59:40 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 06:59:44 UTC] [PASSED] Step 1 finished in 3449ms
+[2026-10-28 06:59:44 UTC] [RUNNING] Step 2: Login with application vault credentials (action: login)
+[2026-10-28 06:59:47 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-28 06:59:48 UTC] Entering encrypted vault password into password field...
+[2026-10-28 06:59:48 UTC] Submitting login form...
+[2026-10-28 07:00:19 UTC] Waiting for post-login page load, transitions, and authentication redirects...
+[2026-10-28 07:00:19 UTC] Post-login framework stabilization (1000ms)...
+[2026-10-28 07:00:20 UTC] [PASSED] Step 2 finished in 36055ms
+[2026-10-28 07:00:27 UTC] Video saved and registered: recording.webm
+[2026-10-28 07:00:27 UTC] Workflow execution completed with status: PASSED
+[2026-10-28 07:00:27 UTC] Summary: 2/2 passed, 0 failed, 0 skipped.

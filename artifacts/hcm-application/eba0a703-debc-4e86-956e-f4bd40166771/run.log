@@ -1,0 +1,274 @@
+[2026-10-28 10:27:07 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: eba0a703-debc-4e86-956e-f4bd40166771)
+[2026-10-28 10:27:07 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 10:27:07 UTC] Browser: chromium (Headless: False)
+[2026-10-28 10:27:07 UTC] Loaded CSV input parameters (4 fields): {'Action': 'open_app', 'Target': '', 'Value': '', 'Description': 'Open application base URL'}
+[2026-10-28 10:27:09 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 10:27:09 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 10:27:16 UTC] [PASSED] Step 1 finished in 6743ms
+[2026-10-28 10:27:16 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-28 10:27:20 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-28 10:27:20 UTC] Entering encrypted vault password into password field...
+[2026-10-28 10:27:20 UTC] Submitting login form...
+[2026-10-28 10:27:51 UTC] Waiting for post-login page load...
+[2026-10-28 10:27:51 UTC] [PASSED] Step 2 finished in 35224ms
+[2026-10-28 10:27:51 UTC] [RUNNING] Step 3: Click Oracle Logo / Navigator menu (action: click_element)
+[2026-10-28 10:27:51 UTC] Clicking element 'pt1:_UIScil1u' (click)...
+[2026-10-28 10:27:54 UTC] [DEBUG] Immediate locator check failed: Locator.click: Timeout 3000ms exceeded.
+Call log:
+  - waiting for locator("[id=\"pt1:_UIScil1u\"], [id$=\":pt1:_UIScil1u\"], [id$=\"_pt1:_UIScil1u\"], [id*=\"pt1:_UIScil1u\"]").first
+    - locator resolved to <a href="#" id="pt1:_UIScil1u" title="Oracle Logo Home" class="xn2 xko p_AFTextOnly" onclick="this.focus();return false;"></a>
+  - attempting click action
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - performing click action
+    - click action done
+    - waiting for scheduled navigations to finish
+
+[2026-10-28 10:27:57 UTC] [PASSED] Step 3 finished in 5824ms
+[2026-10-28 10:27:57 UTC] [RUNNING] Step 4: Click Workforce Management group (action: click_element)
+[2026-10-28 10:27:57 UTC] Clicking element 'groupNode_workforce_management' (click)...
+[2026-10-28 10:27:58 UTC] [PASSED] Step 4 finished in 721ms
+[2026-10-28 10:27:58 UTC] [RUNNING] Step 5: Click New Person menu item (action: click_element)
+[2026-10-28 10:27:58 UTC] Clicking element 'itemNode_workforce_management_new_person' (click)...
+[2026-10-28 10:27:58 UTC] [DEBUG] Immediate locator check failed: Ambiguity detected: locator 'smart='itemNode_workforce_management_new_person'' matched 2 visible elements (out of 2 total matching elements). Please specify an accessible role/name, unique label, or more specific selector to avoid unintended actions.
+[2026-10-28 10:27:58 UTC] Successfully clicked 'itemNode_workforce_management_new_person' via fast interactive DOM resolver.
+[2026-10-28 10:27:59 UTC] [PASSED] Step 5 finished in 762ms
+[2026-10-28 10:27:59 UTC] [RUNNING] Step 6: Wait 3 seconds (action: wait)
+[2026-10-28 10:27:59 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 10:28:02 UTC] [PASSED] Step 6 finished in 3006ms
+[2026-10-28 10:28:02 UTC] [RUNNING] Step 7: Click Hire an Employee (action: click_element)
+[2026-10-28 10:28:02 UTC] Clicking element 'Hire an Employee' (click)...
+[2026-10-28 10:28:07 UTC] [PASSED] Step 7 finished in 4584ms
+[2026-10-28 10:28:07 UTC] [RUNNING] Step 8: Wait 3 seconds (action: wait)
+[2026-10-28 10:28:07 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 10:28:10 UTC] [PASSED] Step 8 finished in 3016ms
+[2026-10-28 10:28:10 UTC] [RUNNING] Step 9: Select Legal Employer (action: select_option)
+[2026-10-28 10:28:15 UTC] Handling custom dropdown / search-and-select for 'Legal Employer' with target option 'ABS India Legal Employer 01'...
+[2026-10-28 10:28:15 UTC] Focusing and typing search query 'ABS India Legal Employer 01' into combobox 'Legal Employer'...
+[2026-10-28 10:28:16 UTC] Confirming search-and-select with Enter key...
+[2026-10-28 10:28:16 UTC] [PASSED] Step 9 finished in 1184ms
+[2026-10-28 10:28:16 UTC] [RUNNING] Step 10: Wait 3 seconds (action: wait)
+[2026-10-28 10:28:16 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 10:28:19 UTC] [PASSED] Step 10 finished in 3018ms
+[2026-10-28 10:28:19 UTC] [RUNNING] Step 11: Enter Last Name (action: fill_input)
+[2026-10-28 10:28:19 UTC] Filling input 'Last Name' with value 'test_035'...
+[2026-10-28 10:28:19 UTC] [PASSED] Step 11 finished in 210ms
+[2026-10-28 10:28:19 UTC] [RUNNING] Step 12: Enter First Name (action: fill_input)
+[2026-10-28 10:28:20 UTC] Filling input 'First Name' with value 'name'...
+[2026-10-28 10:28:20 UTC] [PASSED] Step 12 finished in 253ms
+[2026-10-28 10:28:20 UTC] [RUNNING] Step 13: Click Next (action: click_element)
+[2026-10-28 10:28:20 UTC] Clicking element 'Next' (click)...
+[2026-10-28 10:28:20 UTC] [PASSED] Step 13 finished in 273ms
+[2026-10-28 10:28:20 UTC] [RUNNING] Step 14: Wait 3 seconds (action: wait)
+[2026-10-28 10:28:20 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 10:28:23 UTC] [PASSED] Step 14 finished in 3010ms
+[2026-10-28 10:28:23 UTC] [RUNNING] Step 15: Click Next (action: click_element)
+[2026-10-28 10:28:24 UTC] Clicking element 'Next' (click)...
+[2026-10-28 10:28:24 UTC] [PASSED] Step 15 finished in 334ms
+[2026-10-28 10:28:24 UTC] [RUNNING] Step 16: Wait 3 seconds (action: wait)
+[2026-10-28 10:28:24 UTC] Pausing execution for 3s (3000ms)...
+[2026-10-28 10:28:27 UTC] [PASSED] Step 16 finished in 3013ms
+[2026-10-28 10:28:27 UTC] [RUNNING] Step 17: Select Business Unit (action: select_option)
+[2026-10-28 10:28:27 UTC] Handling custom dropdown / search-and-select for 'Business Unit' with target option 'NK UK Business Unit'...
+[2026-10-28 10:28:27 UTC] Clicking dropdown trigger 'Business Unit' to expand menu...
+[2026-10-28 10:29:28 UTC] [ERROR] Step 17 failed: Locator.click: Timeout 60000ms exceeded.
+Call log:
+  - waiting for get_by_text("Business Unit")
+    - locator resolved to <span>Step 17/23: Select Business Unit</span>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <td class="x1ib">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <td class="x1ib">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+    - retrying click action
+      - waiting 100ms
+    18 × waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <td class="x1ib">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <td class="x15 x4z">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <td class="x1dp" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:Servi1:0:ph1::_afrStr"></td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  13 × retrying click action
+       - waiting 500ms
+       - waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <div class="x19" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:Servi1:0:pfl4">…</div> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <td class="x15 x4z">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <a href="#" class="x3aj" tabindex="-1" onclick="this.focus();return false;" title="Employment Information Step: Current">3 </a> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  5 × retrying click action
+      - waiting 500ms
+      - waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <td class="x1ib">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <td class="x15 x4z">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <div class="x19" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:Servi1:0:pfl4">…</div> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <td class="x1dp" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:ph2::_afrStr"></td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  3 × retrying click action
+      - waiting 500ms
+      - waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <td class="x4w" colspan="1">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <div _afrhcc="0" tabindex="0" class="xel xkg" _afrautohr="10" _lastfrozen="0" _afrfilterable="true" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:NewPe3:0:r8:0:r1:0:dynam1:0:CTXRNj_CategoryPerAsgEitprivateVOPAR__Remarks:0:AT1:_ATp:ATt1" _afrpcid="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:NewPe3:0:r8:0:r1:0:dynam1:0:CTXRNj_CategoryPerAsgEitprivateVOPAR__Remarks:0:AT1:_ATp" _leafcolclientids="['_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:NewPe3:0:r8:0:r1:0:dynam1:0:CTXRNj_CategoryP…>…</div> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <th _d_index="6" align="left" class="x1hq" _afrleaf="true" _afrroot="true" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:NewPe3:0:r8:0:r1:0:dynam1:0:CTXRNj_CategoryPerAsgEitprivateVOORA_PER_RET_GRADE:0:AT1:_ATp:ATt1:effcol11">…</th> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <div role="cell" colspan="3" tabindex="0" class="x1hi" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:NewPe3:0:r8:0:r1:0:dynam1:0:CTXRNj_CategoryPerAsgEitprivateVOPAR__Remarks:0:AT1:_ATp:ATt1::emptyTxt">No data to display.</div> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <td class="x4w" colspan="1">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <div class="x1a" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:panelGroupLayout3">…</div> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <div class="x2sg x2st x6v" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:SPph">…</div> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  6 × retrying click action
+      - waiting 500ms
+      - waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <td class="x1ib">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <div id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:SPpsl3" class="xkg kiosk-header-padding kiosk-header-padding-nosubheader kiosk-header-padding-nobackbutton x16g">…</div> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  2 × retrying click action
+      - waiting 500ms
+      - waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <td class="x15 x4z">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  19 × retrying click action
+       - waiting 500ms
+       - waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <div class="x19" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:pfl2">…</div> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+    - waiting for element to be visible, enabled and stable
+    - element is visible, enabled and stable
+    - scrolling into view if needed
+    - done scrolling
+    - <td class="x1b0">Hide Person Information</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  6 × retrying click action
+      - waiting 500ms
+      - waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <div class="x19" id="_FOpt1:_FOr1:0:_FONSr2:0:MAnt2:1:pt1:pt_r1:2:sP2:pfl2">…</div> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  16 × retrying click action
+       - waiting 500ms
+       - waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <td class="x1ib">…</td> from <div id="_FOd1">…</div> subtree intercepts pointer events
+  - retrying click action
+    - waiting 500ms
+
+[2026-10-28 10:29:28 UTC] Failure screenshot captured: failure_step_17.png
+[2026-10-28 10:29:28 UTC] Per-step on_fail=stop. Aborting remaining steps.
+[2026-10-28 10:29:28 UTC] [SKIPPED] Step 18: Click Next
+[2026-10-28 10:29:28 UTC] [SKIPPED] Step 19: Wait 3 seconds
+[2026-10-28 10:29:28 UTC] [SKIPPED] Step 20: Click Next
+[2026-10-28 10:29:28 UTC] [SKIPPED] Step 21: Wait 3 seconds
+[2026-10-28 10:29:28 UTC] [SKIPPED] Step 22: Click Submit
+[2026-10-28 10:29:28 UTC] [SKIPPED] Step 23: Wait 3 seconds
+[2026-10-28 10:29:29 UTC] Video saved and registered: recording.webm
+[2026-10-28 10:29:29 UTC] Workflow execution completed with status: FAILED
+[2026-10-28 10:29:29 UTC] Summary: 16/23 passed, 1 failed, 6 skipped.

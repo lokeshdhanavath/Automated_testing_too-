@@ -1,0 +1,17 @@
+[2026-10-28 07:06:16 UTC] Starting execution for: 'Dynamic Browser Workflow' (Run ID: c2eb7d3b-580a-4cee-8a9d-4c5f16b5ce10)
+[2026-10-28 07:06:16 UTC] Target Application: 'HCM Application' at https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com
+[2026-10-28 07:06:16 UTC] Browser: chromium (Headless: False)
+[2026-10-28 07:06:16 UTC] Loaded CSV input parameters (4 fields): {'Hours': '8.0', 'Task_Name': 'Frontend Development', 'Project': 'Timesheet App', 'Comments': 'Dynamic action tests'}
+[2026-10-28 07:06:17 UTC] [RUNNING] Step 1: Open application base URL (action: open_app)
+[2026-10-28 07:06:18 UTC] Opening application at: https://fa-erzp-dev26-saasfademo1.ds-fa.oraclepdemos.com/
+[2026-10-28 07:06:23 UTC] [PASSED] Step 1 finished in 5612ms
+[2026-10-28 07:06:23 UTC] [RUNNING] Step 2: Login with vault credentials (action: login)
+[2026-10-28 07:06:27 UTC] Entering username for account 'fin_impl' into login form...
+[2026-10-28 07:06:28 UTC] Entering encrypted vault password into password field...
+[2026-10-28 07:06:28 UTC] Submitting login form...
+[2026-10-28 07:06:59 UTC] Waiting for post-login page load, transitions, and authentication redirects...
+[2026-10-28 07:06:59 UTC] Post-login framework stabilization (1000ms)...
+[2026-10-28 07:07:00 UTC] [PASSED] Step 2 finished in 36985ms
+[2026-10-28 07:07:02 UTC] Video saved and registered: recording.webm
+[2026-10-28 07:07:02 UTC] Workflow execution completed with status: PASSED
+[2026-10-28 07:07:02 UTC] Summary: 2/2 passed, 0 failed, 0 skipped.
